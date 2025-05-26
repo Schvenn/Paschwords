@@ -42,3 +42,7 @@ or you will need to edit the PSD1 file to point these settings to a directory of
     databasedir="DefaultPowerShellDirectory\Modules\Secure\databases"}}
 
 As mentioned above, if you leave "DefaultPowerShellDirectory" in the configuration file, the module will redirect these for you.
+
+# Initial Setup
+A default database and keyfile have been included, with a single entry for demonstration purposes.
+The key has no master password, which I of course don't recommend for real world use, but it will let you test out the functionality.
