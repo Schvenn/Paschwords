@@ -230,3 +230,5 @@ $script:message = $null; $script:warning = $null; if (-not $noclip) {clearclipbo
 
 'q' {""; return}
 default {Write-Host -f red "`nInvalid choice. Try again.`n"}}} while ($true); ""}
+
+Export-ModuleMember -Function pwmanage
