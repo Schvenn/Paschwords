@@ -1,8 +1,10 @@
-@{ModuleVersion = '2.8'
+@{ModuleVersion = '3.0'
 RootModule = 'Secure.psm1'
 FunctionsToExport = @('pwmanage')
 PrivateData = @{defaultkey="secure.key"
 defaultdatabase="secure.pwdb"
 keydir="DefaultPowerShellDirectory\Modules\Secure\keys"
 databasedir="DefaultPowerShellDirectory\Modules\Secure\databases"
-delayseconds="30"}}
+timeoutseconds="900"
+delayseconds="30"
+expirywarning="365"}}
