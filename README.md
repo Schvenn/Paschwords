@@ -8,7 +8,9 @@ If no database/keyfile are specified, the defaults "secure.pwdb" and "secure.key
 
 When a password is retrieved, it will automatically be copied to the clipboard for 30 seconds, unless the -noclip option is used at launch time.
 
-You can configure the default password, default key file and directories where these are saved by modifying the entries in the "Secure.psd1" file located in the same directory as the module.
+You can configure and number of options by modifying the entries in the "Secure.psd1" file located in the same directory as the module, including the default password database filename, default key file and the directories where these are saved, as well as the clipboard timer, session timer and entry expiration date.
+
+Expiration dates only present the entries in a separate browse window for easy identification. No changes are made to the entries.
 
 It is of course, best practice to save the key files somewhere distant from the databases. You could even save the database files on cloud storage, but I recommended saving the keys locally.
 
@@ -30,15 +32,19 @@ So, I created this module to be able to fill that niche.
 In order to use this module the first time, you will either need to create databases and keys directories inside the module's directory,
 or you will need to edit the PSD1 file to point these settings to a directory of your choosing.
 </td>
-<td valign=top width=50%><img src="https://github.com/Schvenn/Secure/raw/main/Screenshot%202025-05-30%20010000.png"></td>
+<td valign=top width=50%><img src="https://raw.githubusercontent.com/Schvenn/Secure/refs/heads/main/Screenshot%202025-06-03%20142800.png"></td>
 </table>
 
-    @{ModuleVersion = '1.0'
+    @{ModuleVersion = '3.0'
     RootModule = 'Secure.psm1'
+    FunctionsToExport = @('pwmanage')
     PrivateData = @{defaultkey="secure.key"
     defaultdatabase="secure.pwdb"
     keydir="DefaultPowerShellDirectory\Modules\Secure\keys"
-    databasedir="DefaultPowerShellDirectory\Modules\Secure\databases"}}
+    databasedir="DefaultPowerShellDirectory\Modules\Secure\databases"
+    timeoutseconds="900"
+    delayseconds="30"
+    expirywarning="365"}}
 
 As mentioned above, if you leave "DefaultPowerShellDirectory" in the configuration file, the module will redirect these for you.
 
