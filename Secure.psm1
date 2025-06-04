@@ -150,7 +150,7 @@ elseif ($total -le 25) {$invalidentry = "`n"
 do {cls; Write-Host -f yellow "`nMultiple matches found:`n"
 for ($i = 0; $i -lt $total; $i++) {$m = $entrymatches[$i]
 $notesAbbrev = if ($m.Notes.Length -gt 40) {$m.Notes.Substring(0,37) + "..."} else {$m.Notes}; $notesAbbrev = $notesAbbrev -replace "\r?\n?", "";
-$urlAbbrev = if ($m.URL.Length -gt 45) {$m.Notes.Substring(0,42) + "..."} else {$m.URL}
+$urlAbbrev = if ($m.URL.Length -gt 45) {$m.URL.Substring(0,42) + "..."} else {$m.URL}
 $tagsAbbrev = if ($m.tags.Length -gt 42) {$m.tags.Substring(0,39) + "..."} else {$m.tags}
 Write-Host -f Cyan "$($i + 1). ".padright(4) -n; Write-Host -f yellow "📜 Title: " -n; Write-Host -f white $($m.Title).padright(38) -n; Write-Host -f yellow " 🆔 User: " -n; Write-Host -f white $($m.Username).padright(30) -n; Write-Host -f yellow " 🔗 URL: " -n; Write-Host -f white $urlAbbrev.padright(46); Write-Host -f yellow "🏷️ Tags:  "-n; Write-Host -f white $tagsAbbrev.padright(42) -n; Write-Host -f yellow " 📝 Notes: " -n; Write-Host -f white $notesAbbrev; Write-Host -f gray ("-" * 100)}
 Write-Host -f red $invalidentry; Write-Host -f yellow "🔍 Select an entry to view or Enter to cancel: " -n; $choice = Read-Host
