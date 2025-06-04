@@ -32,7 +32,7 @@ So, I created this module to be able to fill that niche.
 In order to use this module the first time, you will either need to create databases and keys directories inside the module's directory,
 or you will need to edit the PSD1 file to point these settings to a directory of your choosing.
 </td>
-<td valign=top width=50%><img src="https://raw.githubusercontent.com/Schvenn/Secure/refs/heads/main/Screenshot%202025-06-03%20142800.png"></td>
+<td valign=top width=50%><img src="https://raw.githubusercontent.com/Schvenn/Secure/refs/heads/main/screenshots/Main%20menu.png"></td>
 </table>
 
     @{ModuleVersion = '3.0'
