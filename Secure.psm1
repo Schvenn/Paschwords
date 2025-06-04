@@ -10,7 +10,8 @@ $script:databasedir = $config.PrivateData.databasedir; $script:defaultdatabase =
 $script:delayseconds = $config.PrivateData.delayseconds
 $script:timeoutseconds = $config.PrivateData.timeoutseconds; if ([int]$script:timeoutseconds -gt 5940) {$script:timeoutseconds = 5940}
 $script:expirywarning = $config.PrivateData.expirywarning
-$script:message = $null; $script:warning = $null; $script:unlocked = $false; $script:sessionstart = Get-Date; $script:lastrefresh = 1000; $script:management = $false; $script:quit = $false}
+$script:logretention = $config.PrivateData.logretention; if ([int]$script:logretention -lt 30) {$script:logretention = 30}
+$script:message = $null; $script:warning = $null; $script:unlocked = $false; $script:sessionstart = Get-Date; $script:lastrefresh = 1000; $script:management = $false; $script:quit = $false; $script:noclip = $noclip}
 
 function setdefaults {# Set Key and Database defaults.
 # Check database validity.
@@ -72,12 +73,12 @@ $answer = $null; $confirmDup = $null
 
 # Obtain and validate input.
 Write-Host -f yellow "`n`n📜 Enter Title: " -n; $title = Read-Host; 
-if (-not $title) {$script:warning = "Every entry must have a title, username and URL. Aborted."; nomessage; return loggedin}
+if (-not $title) {$script:warning = "Every entry must have a Title, as well as a Username and URL. Aborted."; nomessage; rendermenu; return}
 Write-Host -f yellow "🆔 Username: " -n; $username = Read-Host
-if (-not $username) {$script:warning = "Every entry must have a title, username and URL. Aborted."; nomessage; return loggedin}
+if (-not $username) {$script:warning = "Every entry must have a Username, as well as a Title and URL. Aborted."; nomessage; rendermenu; return}
 Write-Host -f yellow "🔐 Password: " -n; $password = Read-Host -AsSecureString
 Write-Host -f yellow "🔗 URL: " -n; $url = Read-Host
-if (-not $url) {$script:warning = "Every entry must have a title, username and URL. Aborted."; nomessage; return loggedin}
+if (-not $url) {$script:warning = "Every entry must have a URL, as well as a Title and Username. Aborted."; nomessage; rendermenu; return}
 Write-Host -f yellow "🏷️ Tags: " -n; $tags = Read-Host; $tags = ($tags -split ',') | ForEach-Object {$_.Trim()} | Where-Object {$_} | Join-String -Separator ', '
 Write-Host -f yellow "📝 Notes (Enter, then CTRL-Z + Enter to end): " -n; $notes = [Console]::In.ReadToEnd(); 
 if ($script:unlocked -eq $true) {$key = $script:realKey} else {$key = decryptkey $script:keyfile}
@@ -105,7 +106,7 @@ Write-Host -f yellow "🆔 Username ($($existing.Username)): " -n; $username = R
 Write-Host -f green "🔐 Do you want to keep the original password or use the new one you just entered? (new/old) " -n; $keep = Read-Host
 if ($keep -match "^(?i)old$") {$secure = $existing.Password}
 elseif ($keep -match "^(?i)new$") {}
-else {$script:warning = "Invalid choice. Aborting."; nomessage; return loggedin}
+else {$script:warning = "Invalid choice. Aborting."; nomessage; rendermenu; return}
 
 Write-Host -f yellow "🔗 URL ($($existing.URL)): " -n; $url = Read-Host; if ([string]::IsNullOrEmpty($url)) {$url = $existing.URL}
 Write-Host -f yellow "🏷️ Tags ($($existing.tags)): " -n; $tags = Read-Host; if ([string]::IsNullOrEmpty($tags)) {$tags = $existing.tags}
@@ -114,10 +115,10 @@ Write-Host -f yellow "📝 Notes (CTRL-Z + Enter to end): " -n; $notes = [Consol
 # Check if it's a real change.
 if ($username -eq $existing.Username -and $url -eq $existing.URL -and $tags -eq $existing.tags -and $notes -eq $existing.notes) {Write-Host -f yellow "🤔 No changes detected. Overwrite entry? (Y/N) " -n; $confirmDup = Read-Host
 
-if ($confirmDup -notmatch '^[Yy]') {$script:warning = "Entry not saved."; nomessage; return loggedin}}
+if ($confirmDup -notmatch '^[Yy]') {$script:warning = "Entry not saved."; nomessage; return}}
 
 # Remove old entry and save new.
-$entry = [PSCustomObject]@{Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"); Title = $title; Username = $username; Password = $secure; URL = $url; Tags = $tags; Notes = $notes}; $entries = $entries | Where-Object {!($_.Username -eq $username -and $_.URL -eq $url)}; $entries += $entry; $entries | ForEach-Object {$_ | ConvertTo-Json -Depth 3 -Compress} | Set-Content -Path $database; $script:message = "Modified entry saved successfully."; nowarning; return loggedin}}
+$entry = [PSCustomObject]@{Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"); Title = $title; Username = $username; Password = $secure; URL = $url; Tags = $tags; Notes = $notes}; $entries = $entries | Where-Object {!($_.Username -eq $username -and $_.URL -eq $url)}; $entries += $entry; $entries | ForEach-Object {$_ | ConvertTo-Json -Depth 3 -Compress} | Set-Content -Path $database; $script:message = "Modified entry saved successfully."; nowarning; return}}
 
 $entry = [PSCustomObject]@{Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"); Title = $title; Username = $username; Password = $secure; URL = $url; Tags = $tags; Notes = $notes}
 $entries += $entry; $entries | ForEach-Object {$_ | ConvertTo-Json -Depth 3 -Compress} | Set-Content -Path $database; $script:message = "Entry saved successfully."; nowarning}
@@ -125,7 +126,7 @@ $entries += $entry; $entries | ForEach-Object {$_ | ConvertTo-Json -Depth 3 -Com
 function retrieveentry ($database = $script:database, $keyfile = $script:keyfile, $searchterm, [switch]$noclip) {# Retrieve the password for a single entry.
 
 # Validate minimum search length
-if ($searchterm.Length -lt 3) {$script:warning = "Requested match is too small. Aborting search."; nomessage; return loggedin}
+if ($searchterm.Length -lt 3) {$script:warning = "Requested match is too small. Aborting search."; nomessage; return}
 
 # Decrypt keyfile
 nomessage; nowarning
@@ -135,15 +136,15 @@ Get-Content $script:database | ForEach-Object {$line = $_
 try {$entry = $line | ConvertFrom-Json}
 catch {$fixedLine = $line -replace '"Notes"\s*:\s*"[^"]*"', '"Notes":"[Invalid JSON removed]"'
 try {$entry = $fixedLine | ConvertFrom-Json}
-catch {Write-Host "Skipped invalid JSON line." -f yellow; return loggedin}}
+catch {Write-Host "Skipped invalid JSON line." -f yellow; return}}
 
 # Match on Title or Username
 if ($entry.Title -match $searchterm -or $entry.Url -match $searchterm -or $entry.Tags -match $searchTerm -or $entry.Notes -match $searchterm) {$entrymatches += $entry}}
 $total = $entrymatches.Count
 
 # Check matches count
-if (-not $key) {$script:warning = "🔑 No key loaded.`n" + $script:warning; nomessage; return loggedin}
-if ($total -eq 0) {$script:warning = "🔐 No password found for the entry '$searchterm'"; nomessage; return loggedin}
+if (-not $key) {$script:warning = "🔑 No key loaded.`n" + $script:warning; nomessage; return}
+if ($total -eq 0) {$script:warning = "🔐 No password found for the entry '$searchterm'"; nomessage; return}
 elseif ($total -eq 1) {$selected = $entrymatches[0]}
 elseif ($total -le 25) {$invalidentry = "`n" 
 do {cls; Write-Host -f yellow "`nMultiple matches found:`n"
@@ -153,12 +154,12 @@ $urlAbbrev = if ($m.URL.Length -gt 45) {$m.Notes.Substring(0,42) + "..."} else {
 $tagsAbbrev = if ($m.tags.Length -gt 42) {$m.tags.Substring(0,39) + "..."} else {$m.tags}
 Write-Host -f Cyan "$($i + 1). ".padright(4) -n; Write-Host -f yellow "📜 Title: " -n; Write-Host -f white $($m.Title).padright(38) -n; Write-Host -f yellow " 🆔 User: " -n; Write-Host -f white $($m.Username).padright(30) -n; Write-Host -f yellow " 🔗 URL: " -n; Write-Host -f white $urlAbbrev.padright(46); Write-Host -f yellow "🏷️ Tags:  "-n; Write-Host -f white $tagsAbbrev.padright(42) -n; Write-Host -f yellow " 📝 Notes: " -n; Write-Host -f white $notesAbbrev; Write-Host -f gray ("-" * 100)}
 Write-Host -f red $invalidentry; Write-Host -f yellow "🔍 Select an entry to view or Enter to cancel: " -n; $choice = Read-Host
-if ($choice -eq "") {$script:warning = "Password retrieval cancelled by user."; nomessage; return loggedin}
+if ($choice -eq "") {$script:warning = "Password retrieval cancelled by user."; nomessage; return}
 $parsedChoice = 0; $refParsedChoice = [ref]$parsedChoice
 if ([int]::TryParse($choice, $refParsedChoice) -and $refParsedChoice.Value -ge 1 -and $refParsedChoice.Value -le $total) {$selected = $entrymatches[$refParsedChoice.Value - 1]; break}
 else {$invalidentry = "`nInvalid entry. Try again."}}
 while ($true)}
-else {$script:warning = "Too many matches ($total). Please enter a more specific search."; nomessage; return loggedin}
+else {$script:warning = "Too many matches ($total). Please enter a more specific search."; nomessage; return}
 
 # Decrypt password field
 $plain = "🚫 <no password saved> 🚫"
@@ -166,7 +167,7 @@ if ($selected.Password -and $selected.Password -ne "") {try {$secure = $selected
 catch {$plain = "⚠️ <unable to decrypt password> ⚠️"}}
 
 # Copy to clipboard unless -noclip switch is set
-if (-not $noclip) {$plain | Set-Clipboard; clearclipboard}
+if ($script:noclip -eq $false) {$plain | Set-Clipboard; clearclipboard}
 
 # Compose output message
 $script:message = "`n🗓️ Creation Date: $($selected.Timestamp)`n📜 Title:         $($selected.Title)`n🆔 UserName:      $($selected.Username)`n🔐 Password:      $plain`n🔗 URL:           $($selected.URL)`n🏷️ Tags:          $($selected.Tags)`n📝 Notes:         $($selected.Notes)"; nowarning}
@@ -181,7 +182,7 @@ $aesKey = New-Object byte[] 32; [Security.Cryptography.RNGCryptoServiceProvider]
 $marker = [System.Text.Encoding]::UTF8.GetBytes("SCHV"); $keyWithMarker = $marker + $aesKey
 
 $script:keyfile = Join-Path $script:keydir $script:keyfile
-if (Test-Path $script:keyfile) {$script:warning = "That key file already exists."; nomessage; return loggedin}
+if (Test-Path $script:keyfile) {$script:warning = "That key file already exists."; nomessage; rendermenu; return}
 
 $script:unlocked = $false; Write-Host -f yellow "🔐 Enter a master password to protect your key:" -n; $secureMaster = Read-Host -AsSecureString; $master = [System.Net.NetworkCredential]::new("", $secureMaster).Password
 
@@ -192,13 +193,13 @@ $salt = New-Object byte[] 16; [Security.Cryptography.RNGCryptoServiceProvider]::
 $aes = [Security.Cryptography.Aes]::Create(); $aes.Key = $protectKey; $aes.GenerateIV(); $iv = $aes.IV; $encryptor = $aes.CreateEncryptor(); $encryptedKey = $encryptor.TransformFinalBlock($keyWithMarker, 0, $keyWithMarker.Length)
 
 # Store salt + IV + ciphertext
-$output = [byte[]]($salt + $iv + $encryptedKey); [IO.File]::WriteAllBytes("$script:keyfile", $output); $script:message = "Encrypted AES key created."; $script:keyexists = $true; nowarning}
+$output = [byte[]]($salt + $iv + $encryptedKey); [IO.File]::WriteAllBytes("$script:keyfile", $output); $script:message = "Encrypted AES key created."; $script:keyexists = $true; $script:disablelogging = $false; nowarning}
 
 function importcsv ($csvpath, $database = $script:database, $keyfile = $script:keyfile) {# Import CSV file into database.
 
 # Error-checking.
 $key = decryptkey $keyfile
-if (-not $key) {$script:warning = "Key decryption failed. Aborting import."; nomessage; return loggedin}
+if (-not $key) {$script:warning = "Key decryption failed. Aborting import."; nomessage; return}
 
 # Load current entries.
 $entries = @()
@@ -284,7 +285,7 @@ if ($tagsAdded.Count -gt 0) {Write-Host -f yellow "Tag types added:" -n; Write-H
 Write-Host -f yellow "Tags added:" -n; Write-Host -f white " $($tagsAdded.Name -join ', ')"}; Write-Host -f cyan "`n↩️Return" -n; Read-Host}
 
 function export ($path, $fields) {# Export current database to a CSV file.
-if (-not $script:database) {$script:warning = "No database is currently loaded in memory."; nomessage; return}
+if (-not $script:database) {$script:warning = "No database is currently loaded in memory."; nomessage; rendermenu; return}
 
 $validFields = 'Timestamp','Title','Username','Password','URL','Tags','Notes'; $fieldList = $Fields -split ',' | ForEach-Object {$_.Trim()}; $invalidFields = $fieldList | Where-Object { $_ -notin $validFields }
 if ($invalidFields) {$script:warning = "Invalid field(s): $($invalidFields -join ', ')"; $script:message = "Allowed fields: $($validFields -join ', ')"; return}
@@ -297,7 +298,7 @@ foreach ($field in $fieldList) {$obj[$field] = $_.$field}
 [pscustomobject]$obj}
 
 $filtered | Export-Csv -Path $Path -NoTypeInformation -Force
-if ($path -match '(?i)((\\[^\\]+){2}\\\w+\.CSV)') {$shortname = $matches[1]}; $script:message = "Exported JSON database to: $shortname"; nowarning}
+if ($path -match '(?i)((\\[^\\]+){2}\\\w+\.CSV)') {$shortname = $matches[1]}; $script:message = "Exported JSON database to: $shortname"; nowarning; rendermenu; return}
 
 function backup {# Backup currently loaded key and database pair to the database directory.
 $script:message = $null; $script:warning = $null; $baseName = [System.IO.Path]::GetFileNameWithoutExtension($script:database); $timestamp = Get-Date -Format "MM-dd-yyyy @ HH_mm_ss"; $zipName = "$baseName ($timestamp).zip"; $zipPath = Join-Path $script:databasedir $zipName
@@ -312,7 +313,7 @@ $script:message = $null; $script:warning = $null
 $pattern = '^[A-Za-z0-9_]+ \(\d{2}-\d{2}-\d{4} @ \d{2}_\d{2}_\d{2}\)\.zip$'
 $backups = Get-ChildItem -Path $script:databasedir -Filter '*.zip' | Where-Object { $_.Name -match $pattern } | Sort-Object Name
 
-if (-not $backups) {$script:warning = "No backup files found in: $script:databasedir"; nomessage; return loggedin}
+if (-not $backups) {$script:warning = "No backup files found in: $script:databasedir"; nomessage; return}
 
 # Present numbered list in cyan (number) / white (filename).
 Write-Host -f yellow "`nAvailable backups:`n"
@@ -343,7 +344,7 @@ else {$script:warning = "Key file '$keyLeaf' not found inside ZIP."; nomessage; 
 
 # Cleanup and set success message
 if ($chosenFile -match '(?i)((\\[^\\]+){2}\\[^\\]+\.ZIP)') {$shortfile = $matches[1]} else {$shortfile = $chosenFile}
-Remove-Item $tempDir -Recurse -Force; $script:message = "Restored '$dbLeaf' and '$keyLeaf' from backup: $shortFile"; nowarning; return loggedin}
+Remove-Item $tempDir -Recurse -Force; $script:message = "Restored '$dbLeaf' and '$keyLeaf' from backup: $shortFile"; nowarning; return}
 catch {$script:warning = "Restore failed:`n$_"; nomessage
 if (Test-Path $tempDir) {Remove-Item $tempDir -Recurse -Force}; return}}
 
@@ -360,9 +361,8 @@ if ($joined -match $pattern) {$filtered += $entry}}; $entries = $filtered}
 
 # Browse.
 $total = $entries.Count; $page = 0
-if ($total -eq 0) {$script:warning = "No entries to view."; nomessage; return loggedin}
-while ($true) {cls; if ($sortField) {$entries = if ($descending) {$entries | Sort-Object $sortField -Descending} else {$entries | Sort-Object $sortField}}; 
-$start = $page * $pagesize; $chunk = $entries[$start..([math]::Min($start + $pagesize - 1, $total - 1))]; 
+if ($total -eq 0) {$script:warning = "No entries to view."; nomessage; rendermenu; return}
+while ($true) {cls; if ($sortField) {$entries = if ($descending) {$entries | Sort-Object $sortField -Descending} else {$entries | Sort-Object $sortField}} 
 $start = $page * $pagesize; $chunk = $entries[$start..([math]::Min($start + $pagesize - 1, $total - 1))]; 
 
 if ($expired) {Write-Host -f white "Expired Entries: " -n; Write-Host -f gray "The following entries are more than $script:expirywarning days ($((Get-Date).AddDays(-$script:expirywarning).ToShortDateString())) old since last update."; Write-Host -f yellow ("-" * 130)}
@@ -383,25 +383,25 @@ switch ($key.Key) {
 'W' {if ($sortField -eq "URL") {$descending = -not $descending} else {$sortField = "URL"; $descending = $false}; $page = 0}
 'G' {if ($sortField -eq "Tags") {$descending = -not $descending} else {$sortField = "Tags"; $descending = $false}; $page = 0}
 
-'Q' {nowarning; nomessage; return loggedin}; 'ESCAPE' {nowarning; nomessage; return loggedin}
-default {}}}
+'Q' {nowarning; nomessage; rendermenu; return}; 'ESCAPE' {nowarning; nomessage; rendermenu; return}
+default {}}}}
 
 function removeentry ($database = $script:database, $searchterm) {# Remove an entry.
 
 # Validate minimum search length
-if ($searchterm.Length -lt 3) {$script:warning = "Search term too short. Aborting removal."; nomessage; return loggedin}
+if ($searchterm.Length -lt 3) {$script:warning = "Search term too short. Aborting removal."; nomessage; return}
 
 # Load entries
 $entries = Get-Content $script:database | ForEach-Object {try {$_ | ConvertFrom-Json}
 catch {$fixedLine = $_ -replace '"Notes"\s*:\s*"[^"]*"', '"Notes":"[Invalid JSON removed]"'
 try {$fixedLine | ConvertFrom-Json}
-catch {return loggedin}}}
+catch {return}}}
 
 # Filter matches by Title or URL
 $matches = $entries | Where-Object {$_.Title -match $searchterm -or $_.URL -match $searchterm -or $_.Tags -match $searchterm -or $_.Notes -match $searchterm}
 $count = $matches.Count
-if ($count -eq 0) {$script:warning = "No entries found matching '$searchterm'."; nomessage; return loggedin}
-elseif ($count -gt 25) {$script:warning = "Too many matches ($count). Please refine your search."; nomessage; return loggedin}
+if ($count -eq 0) {$script:warning = "No entries found matching '$searchterm'."; nomessage; return}
+elseif ($count -gt 25) {$script:warning = "Too many matches ($count). Please refine your search."; nomessage; return}
 
 # Select entries.
 if ($count -eq 1) {$selected = $matches[0]}
@@ -414,17 +414,17 @@ $tagsAbbrev = if ($m.tags.Length -gt 42) {$m.tags.Substring(0,39) + "..."} else 
 Write-Host -f Cyan "$($i + 1). ".PadRight(4) -n; Write-Host -f yellow "📜 Title: " -n; Write-Host -f white $($m.Title).PadRight(38) -n; Write-Host -f yellow " 🆔 User: " -n; Write-Host -f white $($m.Username).PadRight(30) -n; Write-Host -f yellow " 🔗 URL: " -n; Write-Host -f white $urlAbbrev.PadRight(46); Write-Host -f yellow " 🏷 Tags: " -n; Write-Host -f white $tagsAbbrev.padright(42) -n; Write-Host -f yellow " 📝 Notes: " -n; Write-Host -f white $notesAbbrev; Write-Host -f gray ("-" * 100)
 }
 Write-Host -f red $invalidentry; Write-Host -f yellow "❌ Select an entry to remove or Enter to cancel: " -n; $choice = Read-Host
-if ($choice -eq "") {$script:warning = "Entry removal cancelled."; nomessage; return loggedin}
+if ($choice -eq "") {$script:warning = "Entry removal cancelled."; nomessage; return}
 $parsedChoice = 0; $refParsedChoice = [ref]$parsedChoice
 if ([int]::TryParse($choice, $refParsedChoice) -and $refParsedChoice.Value -ge 1 -and $refParsedChoice.Value -le $count) {$selected = $matches[$refParsedChoice.Value - 1]; break}
 else {$invalidentry = "`nInvalid entry. Try again."}}
 while ($true)}
 
 # Confirm removal
-Write-Host -f cyan "`nYou selected:`n"; Write-Host -f yellow "📜 Title: " -n; Write-Host -f white "$($selected.Title)"; Write-Host -f yellow "🆔 User:  " -n; Write-Host -f white "$($selected.Username)"; Write-Host -f yellow "🔗 URL:   " -n; Write-Host -f white "$($selected.URL)"; Write-Host -f yellow "🏷  Tags:  " -n; Write-Host -f white "$($selected.Tags)"; Write-Host -f yellow "📝 Notes: " -n; Write-Host -f white "$($selected.Notes)"; Write-Host -f cyan "`nType 'YES' to confirm removal: " -n; $confirm = Read-Host; if ($confirm -ne "YES") {$script:warning = "Removal aborted."; nomessage; return loggedin}
+Write-Host -f cyan "`nYou selected:`n"; Write-Host -f yellow "📜 Title: " -n; Write-Host -f white "$($selected.Title)"; Write-Host -f yellow "🆔 User:  " -n; Write-Host -f white "$($selected.Username)"; Write-Host -f yellow "🔗 URL:   " -n; Write-Host -f white "$($selected.URL)"; Write-Host -f yellow "🏷  Tags:  " -n; Write-Host -f white "$($selected.Tags)"; Write-Host -f yellow "📝 Notes: " -n; Write-Host -f white "$($selected.Notes)"; Write-Host -f cyan "`nType 'YES' to confirm removal: " -n; $confirm = Read-Host; if ($confirm -ne "YES") {$script:warning = "Removal aborted."; nomessage; return}
 
 # Remove entry from file: write back all entries except the selected one
-$updatedEntries = $entries | Where-Object {$_ -ne $selected}; $updatedEntries | ForEach-Object {$_ | ConvertTo-Json -Compress} | Set-Content $script:database; $script:message =  "Entry removed successfully."; nowarning}}
+$updatedEntries = $entries | Where-Object {$_ -ne $selected}; $updatedEntries | ForEach-Object {$_ | ConvertTo-Json -Compress} | Set-Content $script:database; $script:message =  "Entry removed successfully."; nowarning}
 
 function emoji {# Display emoji in Choose an Action prompt when there are processing delays.
 $script:emoji = $null
@@ -442,6 +442,9 @@ elseif ($choice -eq 'OEMCOMMA') {$script:emoji = "📦→︎ Restore"}
 elseif ($choice.length -gt 1) {$script:emoji = ""}
 else {$script:emoji = $choice}
 return $script:emoji}
+
+function managementisdisabled {# Restrict access to specific features.
+emoji; if (-not $script:management) {$script:warning = "'$script:emoji' is disabled outside of management mode."; nomessage; rendermenu; break}}
 
 function rendermenu {# Title and countdown timer.
 $toggle = if ($script:management) {"Hide"} else {"Show"}; $managementcolour = if ($script:management) {"darkgray"} else {"green"}
@@ -482,8 +485,9 @@ if ($script:warning -notmatch "Continuing") {if ($script:warning) {$script:warni
 # Display menu options.
 horizontal
 startline; Write-Host -f cyan " A. " -n; Write-Host -f yellow "➕ [A]dd a new entry or update an existing one.".padright(65) -n; linecap
-startline; Write-Host -f cyan " R. " -n; Write-Host -f white "🔓 [R]etrieve an entry.".padright(66) -n; linecap
-startline; Write-Host -f cyan " X. " -n; Write-Host -f red "❌ Remove an entry.".padright(65) -n; linecap
+$clipboard = if ($script:noclip -eq $true) {"🚫"} else {"📋"}
+startline; Write-Host -f cyan " R. " -n; Write-Host -f white "🔓 [R]etrieve an entry.".padright(50) -n; Write-Host -f cyan "Z. " -n; Write-Host -f white "Clipboard $clipboard " -n; linecap
+startline; Write-Host -f cyan " X. " -n; Write-Host -f red "❌ Remove an entry.".padright(41) -n; if($script:disablelogging){Write-Host -f red "Logging is disabled. 🔴 " -n} else {Write-Host -f green "Logging is enabled.  🟢 " -n};linecap
 horizontal
 startline; Write-Host -f cyan " B. " -n; Write-Host -f white "🧐 [B]rowse all entries.".padright(66) -n; linecap
 startline; Write-Host -f cyan " E. " -n; Write-Host -f white "⌛ [E]xpired entries view.".padright(65) -n; linecap
@@ -510,7 +514,7 @@ startline; if ($script:unlocked -eq $true) {Write-Host "🔓 " -n} else {Write-H
 if ($script:unlocked -eq $true) {Write-Host -f red "[L]ock Session " -n} else {Write-Host -f darkgray "[L]ock Session " -n}
 Write-Host -f white "/ " -n;
 if ($script:unlocked -eq $true) {Write-Host -f darkgray "[U]nlock Session".padright(23) -n} else {Write-Host -f green "[U]nlock Session".padright(23) -n}
-Write-Host -f yellow "❓ [H]elp.".padright(18) -n; Write-Host -f gray "⏏️ [ESC]" -n;; linecap
+Write-Host -f yellow "❓ [H]elp.".padright(17) -n; Write-Host -f gray "⏏️ [ESC] " -n;; linecap
 endcap
 
 # Message and warning center.
@@ -518,204 +522,35 @@ $script:message = wordwrap $script:message; $script:warning = wordwrap $script:w
 if ($script:message.length -ge 1) {Write-Host "  🗨️" -n; indent $script:message white 2}
 if ($script:warning.length -ge 1) {Write-Host "  ⚠️" -n; indent $script:warning red 2}
 if ($script:message.length -ge 1 -or $script:warning.length -ge 1 ) {Write-Host -f cyan ("-" * 72)}
-$lastcommand = emoji; Write-Host -f white "⚡ Choose an action: " -n; Write-Host -f darkgray "$emoji " -n}
+$lastcommand = emoji; Write-Host -f white "⚡ Choose an action: " -n}
 
-function menuchoices {# Menu system.
+function logchoices ($choice, $message, $warning){# Log user actions.
+# Do not log if the user has turned off logging.
+if ($script:disablelogging) {return}
 
-# Prevent access to management options when the Management toggle is off.
-function managementisdisabled {emoji; if (-not $script:management) {$script:warning = "'$script:emoji' is disabled outside of management mode."; nomessage; return loggedin}}
+# Map keys to descriptions.
+$choice = $key.Key.ToString().ToUpperInvariant()
+$map = @{'A' = 'Add an entry'; 'R' = 'Retrieve an entry'; 'X' = 'Remove an entry'; 'B' = 'Browse entries'; 'E' = 'View expired entries'; 'S' = 'Search entries'; 'L' = 'Lock'; 'U' = 'Unlock'; 'T' = 'Reset timer'; 'O' = 'Restore Default Key & Database'; 'Z' = 'Toggle Clipboard'; 'M' = 'Toggle management view'; 'K' = 'Select a key'; 'C' = 'Create a key'; 'D' = 'Select a database'; 'P' = 'Create a database'; 'V' = 'Verify a PWDB'; 'I' = 'Import a CSV'; 'OEMMINUS' = 'Export to CSV'; 'SUBTRACT' = 'Export to CSV'; 'OEMPERIOD' = 'Backup key and database'; 'OEMCOMMA' = 'Restore a key and database'; 'Q' = 'Quit'; 'H' = 'Help'; 'F1' = 'Help'; 'F4' = 'Toggle logging'; 'BACKSPACE' = 'Clear message center'}
+if (-not $map.ContainsKey($choice)) {Add-Content -Path $script:logfile -Value "$(Get-Date -Format 'HH:mm:ss') - UNRECOGNIZED: $choice"; return}
 
-do {switch ($choice) {
-'A' {# Add a new entry.
-if ($script:database -and $script:keyfile -and $script:unlocked) {newentry $script:database $script:keyfile; $choice = $null}
-else {$script:warning = "A database and key must be opened and unlocked to add an entry."; nomessage}
-return loggedin}
+# Create directory, if it doesn't exist.
+$script:logdir = Join-Path $PSScriptRoot 'logs'
+if (-not (Test-Path $logdir)) {New-Item $logdir -ItemType Directory -Force | Out-Null}
 
-'R' {# Retrieve an entry.
-if (-not $script:keyfile) {$script:warning = "🔑 No key loaded."; nomessage; return loggedin}
-if ($script:database) {Write-Host -f green "`n`n🔓 Enter Title, 🔗 URL, 🏷  Tag or 📝 Note to identify entry: " -n; $searchterm = Read-Host; retrieveentry $script:database $script:keyfile $searchterm}
-if (-not $script:database) {$script:warning = "📑 No database loaded. " + $script:warning; nomessage}; 
-return loggedin}
+# Cleanup old logs (older than the number of days set in logretention, with the minimum set to 30 days).
+Get-ChildItem -Path $logdir -Filter 'log - *.log' | Where-Object {$_.LastWriteTime -lt (Get-Date).AddDays(-[int]$script:logretention)} | Remove-Item -Force
 
-'X' {# Remove an entry.
-Write-Host -f green "`n`n❌ Enter Title, URL, Tag or Note to identify entry: " -n; $searchterm = Read-Host; removeentry $script:database $searchterm; return loggedin}
+# Create base file each session.
+if (-not $script:logfile) {$timestamp = (Get-Date).ToString('MM-dd-yy @ HH_mm_ss'); $script:logfile = Join-Path $logdir "log - $timestamp.log"}
 
-'B' {# Browse all entries.
-$entries = [System.Collections.ArrayList]::new()
-if (-not $script:database) {$script:warning = "No database loaded."; nomessage}
-if ($script:database) {Get-Content $script:database | ForEach-Object {try {$obj = $_ | ConvertFrom-Json
-if ($obj) {$entries.Add($obj) | Out-Null}}
-catch {Write-Host -f red "`nSkipping an invalid JSON line. Please check the file for corruption or incorrectly formatted entries.`nIf you make changes to the file, those lines will be lost."}}
-if (-not $entries.Count) {$script:warning = "No valid entries found to display."; nomessage; break}
-showentries $entries; nomessage; nowarning}; return loggedin}
+# Compile entry information.
+$timestamp = Get-Date -Format 'HH:mm:ss'; $info = "$(if ($message) {" - MESSAGE: $message"})$(if ($warning) {" - WARNING: $warning"})"; $entry = "$timestamp - $($map[$choice])$info`n" + ("-" * 100)
 
-'E' {# Retrieve expired entries.
-$entries = [System.Collections.ArrayList]::new()
-if (-not $script:database) {$script:warning = "No database loaded."; nomessage}
-if ($script:database) {Get-Content $script:database | ForEach-Object {try {$obj = $_ | ConvertFrom-Json
-if ($obj) {$entries.Add($obj) | Out-Null}}
-catch {Write-Host -f red "`nSkipping an invalid JSON line. Please check the file for corruption or incorrectly formatted entries.`nIf you make changes to the file, those lines will be lost."}}
-if (-not $entries.Count) {$script:warning = "No valid entries found to display."; nomessage; break}
-showentries $entries -expired; nomessage; nowarning}; return loggedin}
-
-'S' {# Search for keyword matches.
-$entries = [System.Collections.ArrayList]::new()
-if (-not $script:database) {$script:warning = "No database loaded."; nomessage}
-if ($script:database) {Write-Host -f yellow "`n`nProvide a comma separated list of keywords to find: " -n; $keywords = Read-Host
-if ($keywords.length -eq 0) {$script:warning = "No search terms provided."; nomessage; return loggedin}
-Get-Content $script:database | ForEach-Object {try {$obj = $_ | ConvertFrom-Json
-if ($obj) {$entries.Add($obj) | Out-Null}}
-catch {Write-Host -f red "`nSkipping an invalid JSON line. Please check the file for corruption or incorrectly formatted entries.`nIf you make changes to the file, those lines will be lost."}}
-if (-not $entries.Count) {$script:warning = "No valid entries found to display."; nomessage; break}
-showentries $entries -search -keywords $keywords; nomessage; nowarning}; return loggedin}
-
-'M' {# Toggle Management mode.
-if ($script:management) {$script:management = $false}
-else {$script:management = $true}
-$choice = $null; nowarning; nomessage; rendermenu}
-
-'K' {# Select a different password encryption key.
-managementisdisabled
-$script:keyfiles = Get-ChildItem -Path $script:keydir -Filter *.key
-if (-not $script:keyfiles) {$script:warning = "No .key files found."; nomessage; return loggedin}
-Write-Host -f white "`n`n🗝  Available AES Key Files:"; Write-Host -f yellow ("-" * 70)
-for ($i = 0; $i -lt $script:keyfiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $script:keyfiles[$i].Name}
-Write-Host -f green "`n🗝  Enter number of the key file to use: " -n; $sel = Read-Host
-if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $script:keyfiles.Count) {$script:keyfile = $script:keyfiles[$sel - 1].FullName; $script:keyexists = $true; nowarning; $key = $null; $script:unlocked = $false; $key = decryptkey $script:keyfile; if ($script:keyfile -match '(?i)((\\[^\\]+){2}\\\w+\.KEY)') {$shortkey = $matches[1]} else {$shortkey = $script:keyfile} $script:message = "$shortkey selected and made active."
-if (-not $key) {$script:warning += " Key decryption failed. Aborting."; nomessage; return loggedin}}; return loggedin}
-
-'C' {# Create a new password encryption key.
-managementisdisabled
-Write-Host -f green "`n`n🔑 Enter filename for new keyfile: " -n; $getkey = Read-Host
-if ($getkey -lt 1) {$script:warning = "No filename entered."; nomessage; return loggedin}
-if (-not $getkey.EndsWith(".key")) {$getkey += ".key"}
-$script:keyfile = $getkey
-newkey $script:keyfile; return loggedin}
-
-'D' {# Select a different database.
-managementisdisabled
-$dbFiles = Get-ChildItem -Path $script:databasedir -Filter *.pwdb
-if (-not $dbFiles) {$script:warning = "No .pwdb files found."; nomessage; return loggedin}
-Write-Host -f white "`n`n📑 Available Password Databases:"; Write-Host -f yellow ("-" * 70)
-for ($i = 0; $i -lt $dbFiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $dbFiles[$i].Name}
-Write-Host -f green "`n📑 Enter number of the database file to use: " -n; $sel = Read-Host
-if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $dbFiles.Count) {$script:database = $dbFiles[$sel - 1].FullName; $dbloaded = $script:database -replace '.+\\Modules\\', ''; $script:message = "$dbloaded selected and made active."; nowarning}
-else {$script:warning = "Invalid selection."; nomessage}; return loggedin}
-
-'P' {# Create a new password database.
-managementisdisabled
-Write-Host -f green "`n`n📄 Enter filename for new password database: " -n; $getdatabase = Read-Host
-if ($getdatabase.length -lt 1) {$script:warning = "No filename entered."; nomessage; return loggedin}
-if (-not $getdatabase.EndsWith(".pwdb")) {$getdatabase += ".pwdb"}
-$path = Join-Path $script:databasedir $getdatabase
-if (Test-Path $path) {$script:warning = "File already exists. Choose a different name."; nomessage}
-else {New-Item -Path $path -ItemType File | Out-Null; if ($script:database -match '(?i)((\\[^\\]+){2}\\\w+\.PWDB)') {$shortdb = $matches[1]} else {$shortdb = $script:database}; $script:message = "$shortdb created and made active."; nowarning; $script:database = $path}; return loggedin}
-
-'V' {# Verify a PWDB file.
-managementisdisabled
-Write-Host -f cyan "`n`n✅ Provide full path of PWDB file to validate: " -n; $FilePath = Read-Host
-if (-not $FilePath) {$script:warning = "Aborted."; nomessage; return loggedin}
-if (-not (Test-Path $FilePath)) {$script:warning = "File not found: $FilePath"; nomessage; return loggedin}
-$lineNumber = 0; $invalidLines = @(); $fixedLines = @(); Get-Content $FilePath | ForEach-Object {$lineNumber++; $line = $_.Trim()
-if ($line -eq '') {return loggedin}
-try {$null = $line | ConvertFrom-Json -ErrorAction Stop}
-catch {$fixedLine = $line -replace '"Notes"\s*:\s*"[^"]*"', '"Notes":"[Invalid JSON removed]"'
-try {$null = $fixedLine | ConvertFrom-Json -ErrorAction Stop; $fixedLines += [PSCustomObject]@{LineNumber = $lineNumber; OriginalContent = $line; FixedContent = $fixedLine}}
-catch {$invalidLines += [PSCustomObject]@{LineNumber = $lineNumber; Content = $line; Reason = "Invalid JSON even after 'Notes' fix: $($_.Exception.Message)"}}}}
-if ($fixedLines.Count -gt 0) {Write-Host -f yellow "`nLines fixed by 'Notes' replacement:"; $fixedLines | Format-Table -AutoSize}
-else {Write-Host -f green "`nNo lines needed fixing."}
-if ($invalidLines.Count -gt 0) {Write-Host -f red"`nLines still invalid after fix attempt:"; $invalidLines | Format-Table -AutoSize}
-else {Write-Host -f green "`nAll JSON lines are valid or fixable."}
-Write-Host -f yellow "`n↩️ Return " -n; Read-Host; return loggedin}
-
-'I' {# Import a CSV password database.
-managementisdisabled
-$script:message = "Imported files must contain the fields: Title, Username, Password and URL. Timestamp is ignored and Password can be empty, but must exist. All other fields can be added as notes and/or tags. Fields added to notes will only be added if they are populated. Fields added to tags can be added to all imported entries or only those that are populated."; nowarning; rendermenu
-if (-not $script:database -and -not $script:keyfile) {$script:warning = "You must have a database and key file loaded in order to start an import."; nomessage; return loggedin}
-Write-Host -f yellow "`n`n📥 Enter the full path to the CSV file: " -n; $csvpath = Read-Host
-if (-not $csvpath) {$script:warning = "Aborted."; nomessage; return loggedin}
-if (Test-Path $csvpath -ErrorAction SilentlyContinue) {importcsv $csvpath $script:database $script:keyfile}
-else {$script:warning = "CSV not found."; nomessage}; return loggedin}
-
-'OEMMINUS' {# Export all entries.
-managementisdisabled
-nomessage; nowarning; rendermenu; $choice = $null
-Write-Host -f yellow "`n`nProvide an export path for the database.`nOtherwise the database directory will be used: " -n; $path = Read-Host
-if ($path.length -lt 1) {$path = "$script:database"; $path = $path -replace '\.pwdb$', '.csv'}
-Write-Host -f yellow "`nSpecify the fields and the order in which to includet them.`nThe default is (" -n; Write-Host -f white "Title, Username, URL" -n; Write-Host -f yellow "): " -n; $fields = Read-Host
-if ($fields.length -lt 1) {$fields = "Title,Username,URL"}
-$fields = $fields -replace "\s*,\s*", ","
-Write-Host -f yellow "`nProceed? (Y/N) " -n; $confirmexport = Read-Host
-if ($confirmexport -match "^[Yy]$") {export $path $fields} else {$script:warning = "Aborted."; nomessage; return loggedin}}
-
-'SUBTRACT' {# Export all entries.
-managementisdisabled
-$script:message = "Export Placeholder"; nowarning; rendermenu; $choice = $null}
-
-'OEMPERIOD' {# Backup current database and key.
-managementisdisabled
-backup; return loggedin}
-
-'OEMCOMMA' {# Retore a backup.
-managementisdisabled
-restore; return loggedin}
-
-'L' {# Lock session.
-$script:message = "Session locked."; nowarning; $script:unlocked = $false; if (-not $noclip) {clearclipboard 0 64}; return loggedin}
-
-'U' {# Unlock session.
-if ($script:keyfile) {""; $key = decryptkey $script:keyfile}
-else {$script:warning = "🔑 No key loaded."; nomessage}
-if ($key) {$script:message = "Session unlocked."}; nowarning; return loggedin}
-
-'Q' {# Quit. (Includes funky logic to capture keys after the user confirms.)
-Write-Host -f green "`n`nAre you sure you want to quit? (Y/N) " -n; $confirmquit = Read-Host; rendermenu
-if ($confirmquit -notmatch "^[Yy]$") {return loggedin}
-if ($confirmquit -match "^[Yy]$") {$script:quit = $true; logoff; while ([Console]::KeyAvailable) {return} return}}
-
-'H' {# Help.
-nowarning
-$script:message = "❓ Usage: pwmanage <database.pwdb> <keyfile.key> -noclip`n
-`n
-If no database/keyfile are specified, the defaults `"secure.pwdb`" and `"secure.key`" will be used.`n
-`n
-When a password is retrieved, it will automatically be copied to the clipboard for 30 seconds, unless the -noclip option is used at launch time.`n
-`n
-You can configure the default password, default key file and directories where these are saved by modifying the entries in the `"Secure.psd1`" file located in the same directory as the module.`n
-`n
-You can also set the clipboard timer length, session timer and default expiration time of entries in this file, as well.`n
-`n
-It is of course, best practice to save the key files somewhere distant from the databases. You could even save the database files on cloud storage, but I recommended saving the keys locally.`n
-`n
-The import function is extremely powerful, accepting non-standard fields such as tags and/or notes. Press 'I' in management mode for more details.
-`n
-The initial configurations of the directories within the PSD1 file point to: `"DefaultPowerShellDirectory\Modules\Secure\keys`" and `"DefaultPowerShellDirectory\Modules\Secure\databases`". The term `"DefaultPowerShellDirectory`" though, is a placeholder that is evaluated within the module, redirecting these to your personal PowerShell directory. As stated above, I advise moving these somewhere else once you've setup the database and plan to use it long-term."; if ($script:keyexists -eq $false) {$script:warning = "First time use: You will need to create key and database files with the options above. The defaults configured in the PSD1 file use the filename `"secure`" for both."}; return loggedin}
-
-'ESCAPE' {# Quit. (Includes funky logic to capture keys after the user confirms.)
-Write-Host -f green "`n`nAre you sure you want to quit? (Y/N) " -n; $confirmquit = Read-Host; rendermenu
-if ($confirmquit -notmatch "^[Yy]$") {return loggedin}
-if ($confirmquit -match "^[Yy]$") {$script:quit = $true; logoff; while ([Console]::KeyAvailable) {return}; return}}
-
-'T' {# Set Timer.
-if (-not $script:keyfile) {$script:warning += "`nYou must have a key loaded and unlocked to reset its timer."; nomessage; return loggedin}
-$script:unlocked = $false; ""; $key = decryptkey $script:keyfile
-if ($script:unlocked) {Write-Host -f yellow "`nHow many minutes should the session remain unlocked? (1-99) " -n; $usersetminutes = Read-Host; if ($usersetminutes -as [int] -and [int]$usersetminutes -ge 1 -and [int]$usersetminutes -le 99) {$script:timeoutseconds = [int]$usersetminutes * 60; $script:sessionstart = Get-Date; while ([Console]::KeyAvailable) {[Console]::ReadKey($true) > $null}; $script:lastrefresh = 99; return loggedin}
-else {$script:warning = "Invalid timer value set."; nomessage; return}}}
-
-'O' {# Reload defaults.
-if (-not $script:database -or -not $script:keyfile) {$script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; ""; $script:key = decryptkey $script:keyfile; 
-if ($script:unlocked) {$script:message = "Defaults successfully loaded and made active."; nowarning; return loggedin}
-else {$script:database = $null; $script:keyfile = $null; return loggedin}}
-else {return loggedin}}
-
-'BACKSPACE' {# Clear messages.
-nomessage; nowarning; return loggedin}
-
-'ENTER' {# Clear messages.
-nomessage; nowarning; return loggedin}
-
-default {# Garbage collection.
-if ($choice.length -gt 0) {$script:warning = "'$choice' is an invalid choice. Try again."}; Start-Sleep 1; return loggedin}}} while ($true)}
+# Ensure log gets written by retrying 5 times for every log, to avoid race conditions.
+$retries = 5
+for ($i = 0; $i -lt $retries; $i++) {try {$fs = [System.IO.File]::Open($script:logfile, 'Append', 'Write', 'ReadWrite'); $sw = New-Object System.IO.StreamWriter($fs)
+$sw.WriteLine($entry); $sw.Close(); $fs.Close(); break}
+catch {Start-Sleep -Milliseconds 100}}}
 
 function login {# Display initial login screen.
 $script:sessionstart = Get-Date; $key = $null
@@ -752,7 +587,240 @@ else {Start-Sleep -Seconds 1}}
 
 # Sent key presses to the menu for processing.
 if ([Console]::KeyAvailable -and -not $script:quit) {$key = [Console]::ReadKey($true); $choice = $key.Key.ToString().ToUpper()
-menuchoices $choice
+
+logchoices $choice $script:message $script:warning
+switch ($choice) {
+'A' {# Add a new entry.
+if ($script:database -and $script:keyfile -and $script:unlocked) {newentry $script:database $script:keyfile; rendermenu}
+else {$script:warning = "A database and key must be opened and unlocked to add an entry."; nomessage}
+rendermenu}
+
+'R' {# Retrieve an entry.
+if (-not $script:keyfile) {$script:warning = "🔑 No key loaded."; nomessage}
+if ($script:database) {Write-Host -f green "`n`n🔓 Enter Title, 🔗 URL, 🏷  Tag or 📝 Note to identify entry: " -n; $searchterm = Read-Host; retrieveentry $script:database $script:keyfile $searchterm}
+if (-not $script:database) {$script:warning = "📑 No database loaded. " + $script:warning; nomessage}; 
+rendermenu}
+
+'X' {# Remove an entry.
+Write-Host -f green "`n`n❌ Enter Title, URL, Tag or Note to identify entry: " -n; $searchterm = Read-Host; removeentry $script:database $searchterm; rendermenu}
+
+'B' {# Browse all entries.
+$entries = [System.Collections.ArrayList]::new()
+if (-not $script:database) {$script:warning = "No database loaded."; nomessage; rendermenu}
+if ($script:database) {Get-Content $script:database | ForEach-Object {try {$obj = $_ | ConvertFrom-Json
+if ($obj) {$entries.Add($obj) | Out-Null}}
+catch {Write-Host -f red "`nSkipping an invalid JSON line. Please check the file for corruption or incorrectly formatted entries.`nIf you make changes to the file, those lines will be lost."}}
+if (-not $entries.Count) {$script:warning = "No valid entries found to display."; nomessage}
+showentries $entries; nomessage; nowarning}}
+
+'E' {# Retrieve expired entries.
+$entries = [System.Collections.ArrayList]::new()
+if (-not $script:database) {$script:warning = "No database loaded."; nomessage; rendermenu}
+if ($script:database) {Get-Content $script:database | ForEach-Object {try {$obj = $_ | ConvertFrom-Json
+if ($obj) {$entries.Add($obj) | Out-Null}}
+catch {Write-Host -f red "`nSkipping an invalid JSON line. Please check the file for corruption or incorrectly formatted entries.`nIf you make changes to the file, those lines will be lost."}}
+if (-not $entries.Count) {$script:warning = "No valid entries found to display."; nomessage}
+showentries $entries -expired; nomessage; nowarning}}
+
+'S' {# Search for keyword matches.
+$entries = [System.Collections.ArrayList]::new()
+if (-not $script:database) {$script:warning = "No database loaded."; nomessage; rendermenu}
+if ($script:database) {Write-Host -f yellow "`n`nProvide a comma separated list of keywords to find: " -n; $keywords = Read-Host
+if ($keywords.length -eq 0) {$script:warning = "No search terms provided."; nomessage}
+Get-Content $script:database | ForEach-Object {try {$obj = $_ | ConvertFrom-Json
+if ($obj) {$entries.Add($obj) | Out-Null}}
+catch {Write-Host -f red "`nSkipping an invalid JSON line. Please check the file for corruption or incorrectly formatted entries.`nIf you make changes to the file, those lines will be lost."}}
+if (-not $entries.Count) {$script:warning = "No valid entries found to display."; nomessage}
+showentries $entries -search -keywords $keywords; nomessage; nowarning}}
+
+'M' {# Toggle Management mode.
+if ($script:management -eq $true) {$script:management = $false}
+else {$script:management = $true}
+nowarning; nomessage; rendermenu}
+
+'K' {# Select a different password encryption key.
+managementisdisabled
+$script:keyfiles = Get-ChildItem -Path $script:keydir -Filter *.key
+if (-not $script:keyfiles) {$script:warning = "No .key files found."; nomessage; rendermenu}
+elseif ($script:keyfiles) {Write-Host -f white "`n`n🗝  Available AES Key Files:"; Write-Host -f yellow ("-" * 70)
+for ($i = 0; $i -lt $script:keyfiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $script:keyfiles[$i].Name}
+Write-Host -f green "`n🗝  Enter number of the key file to use: " -n; $sel = Read-Host
+if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $script:keyfiles.Count) {$script:keyfile = $script:keyfiles[$sel - 1].FullName; $script:keyexists = $true; nowarning; $key = $null; $script:unlocked = $false; $key = decryptkey $script:keyfile; if ($script:keyfile -match '(?i)((\\[^\\]+){2}\\\w+\.KEY)') {$shortkey = $matches[1]} else {$shortkey = $script:keyfile} $script:message = "$shortkey selected and made active."; $script:disablelogging = $false
+if (-not $key) {$script:warning += " Key decryption failed. Aborting."; nomessage}}}; rendermenu}
+
+'C' {# Create a new password encryption key.
+managementisdisabled
+Write-Host -f green "`n`n🔑 Enter filename for new keyfile: " -n; $getkey = Read-Host
+if ($getkey -lt 1) {$script:warning = "No filename entered."; nomessage; rendermenu}
+else {if (-not $getkey.EndsWith(".key")) {$getkey += ".key"}
+$script:keyfile = $getkey
+newkey $script:keyfile; $rendermenu}}
+
+'D' {# Select a different database.
+managementisdisabled
+$dbFiles = Get-ChildItem -Path $script:databasedir -Filter *.pwdb
+if (-not $dbFiles) {$script:warning = "No .pwdb files found."; nomessage; rendermenu}
+else {Write-Host -f white "`n`n📑 Available Password Databases:"; Write-Host -f yellow ("-" * 70)
+for ($i = 0; $i -lt $dbFiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $dbFiles[$i].Name}
+Write-Host -f green "`n📑 Enter number of the database file to use: " -n; $sel = Read-Host
+if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $dbFiles.Count) {$script:database = $dbFiles[$sel - 1].FullName; $dbloaded = $script:database -replace '.+\\Modules\\', ''; $script:message = "$dbloaded selected and made active."; nowarning}
+else {$script:warning = "Invalid selection."; nomessage}; rendermenu}}
+
+'P' {# Create a new password database.
+managementisdisabled
+Write-Host -f green "`n`n📄 Enter filename for new password database: " -n; $getdatabase = Read-Host
+if ($getdatabase.length -lt 1) {$script:warning = "No filename entered."; nomessage; rendermenu}
+else {if (-not $getdatabase.EndsWith(".pwdb")) {$getdatabase += ".pwdb"}
+$path = Join-Path $script:databasedir $getdatabase
+if (Test-Path $path) {$script:warning = "File already exists. Choose a different name."; nomessage}
+else {New-Item -Path $path -ItemType File | Out-Null; if ($script:database -match '(?i)((\\[^\\]+){2}\\\w+\.PWDB)') {$shortdb = $matches[1]} else {$shortdb = $script:database}; $script:message = "$shortdb created and made active."; nowarning; $script:database = $path}; rendermenu}}
+
+'V' {# Verify a PWDB file.
+managementisdisabled
+Write-Host -f cyan "`n`n✅ Provide full path of PWDB file to validate: " -n; $filepath = Read-Host
+if ($filepath.length -lt 1) {$script:warning = "Aborted."; nomessage; rendermenu}
+elseif (-not (Test-Path $filepath)) {$script:warning = "File not found: $filepath"; nomessage; rendermenu}
+else {$lineNumber = 0; $invalidLines = @(); $fixedLines = @(); Get-Content $filepath | ForEach-Object {$lineNumber++; $line = $_.Trim()
+if ($line -eq '') {return}
+try {$null = $line | ConvertFrom-Json -ErrorAction Stop}
+catch {$fixedLine = $line -replace '"Notes"\s*:\s*"[^"]*"', '"Notes":"[Invalid JSON removed]"'
+try {$null = $fixedLine | ConvertFrom-Json -ErrorAction Stop; $fixedLines += [PSCustomObject]@{LineNumber = $lineNumber; OriginalContent = $line; FixedContent = $fixedLine}}
+catch {$invalidLines += [PSCustomObject]@{LineNumber = $lineNumber; Content = $line; Reason = "Invalid JSON even after 'Notes' fix: $($_.Exception.Message)"}}}}
+if ($fixedLines.Count -gt 0) {Write-Host -f yellow "`nLines fixed by 'Notes' replacement:"; $fixedLines | Format-Table -AutoSize}
+else {Write-Host -f green "`nNo lines needed fixing."}
+if ($invalidLines.Count -gt 0) {Write-Host -f red"`nLines still invalid after fix attempt:"; $invalidLines | Format-Table -AutoSize}
+else {Write-Host -f green "`nAll JSON lines are valid or fixable."}
+Write-Host -f yellow "`n↩️ Return " -n; Read-Host; rendermenu}}
+
+'I' {# Import a CSV password database.
+managementisdisabled
+$script:message = "Imported files must contain the fields: Title, Username, Password and URL. Timestamp is ignored and Password can be empty, but must exist. All other fields can be added as notes and/or tags. Fields added to notes will only be added if they are populated. Fields added to tags can be added to all imported entries or only those that are populated."; nowarning
+if (-not $script:database -and -not $script:keyfile) {$script:warning = "You must have a database and key file loaded in order to start an import."; nomessage; return}
+Write-Host -f yellow "`n`n📥 Enter the full path to the CSV file: " -n; $csvpath = Read-Host
+if ($csvpath.length -lt 1) {$script:warning = "Aborted."; nomessage; rendermenu}
+elseif (Test-Path $csvpath -ErrorAction SilentlyContinue) {importcsv $csvpath $script:database $script:keyfile}
+else {$script:warning = "CSV not found."; nomessage}; rendermenu}
+
+'OEMMINUS' {# Export all entries.
+managementisdisabled
+nomessage; nowarning; rendermenu
+Write-Host -f yellow "`n`nProvide an export path for the database.`nOtherwise the database directory will be used: " -n; $path = Read-Host
+if ($path.length -lt 1) {$path = "$script:database"; $path = $path -replace '\.pwdb$', '.csv'}
+Write-Host -f yellow "`nSpecify the fields and the order in which to includet them.`nThe default is (" -n; Write-Host -f white "Title, Username, URL" -n; Write-Host -f yellow "): " -n; $fields = Read-Host
+if ($fields.length -lt 1) {$fields = "Title,Username,URL"}
+$fields = $fields -replace "\s*,\s*", ","
+Write-Host -f yellow "`nProceed? (Y/N) " -n; $confirmexport = Read-Host
+if ($confirmexport -match "^[Yy]$") {export $path $fields} else {$script:warning = "Aborted."; nomessage; rendermenu}}
+
+'SUBTRACT' {# Export all entries.
+managementisdisabled
+nomessage; nowarning; rendermenu; rendermenu
+Write-Host -f yellow "`n`nProvide an export path for the database.`nOtherwise the database directory will be used: " -n; $path = Read-Host
+if ($path.length -lt 1) {$path = "$script:database"; $path = $path -replace '\.pwdb$', '.csv'}
+Write-Host -f yellow "`nSpecify the fields and the order in which to includet them.`nThe default is (" -n; Write-Host -f white "Title, Username, URL" -n; Write-Host -f yellow "): " -n; $fields = Read-Host
+if ($fields.length -lt 1) {$fields = "Title,Username,URL"}
+$fields = $fields -replace "\s*,\s*", ","
+Write-Host -f yellow "`nProceed? (Y/N) " -n; $confirmexport = Read-Host
+if ($confirmexport -match "^[Yy]$") {export $path $fields; rendermenu} else {$script:warning = "Aborted."; nomessage; rendermenu}}
+
+'OEMPERIOD' {# Backup current database and key.
+managementisdisabled
+backup; rendermenu}
+
+'OEMCOMMA' {# Retore a backup.
+managementisdisabled
+restore; rendermenu}
+
+'L' {# Lock session.
+$script:message = "Session locked."; nowarning; $script:unlocked = $false; if ($script:noclip -eq $false) {clearclipboard 0 64}; rendermenu}
+
+'U' {# Unlock session.
+if ($script:keyfile) {""; $key = decryptkey $script:keyfile}
+else {$script:warning = "🔑 No key loaded."; nomessage}
+if ($script:unlocked) {$script:message = "Session unlocked."}; nowarning; rendermenu}
+
+'Z' {# Toggle clipboard.
+if ($script:noclip -eq $true) {$script:noclip = $false; $script:message = "Retrieved passwords will be copied to the clipboard for $script:delayseconds seconds."; nowarning; rendermenu}
+elseif ($script:noclip -eq $false) {$script:noclip = $true; $script:message = "Retrieved passwords will not be copied to the clipboard."; nowarning; rendermenu}}
+
+'Q' {# Quit. (Includes funky logic to capture keys after the user confirms.)
+Write-Host -f green "`n`nAre you sure you want to quit? (Y/N) " -n; $confirmquit = Read-Host
+if ($confirmquit -notmatch "^[Yy]$") {$script:warning = "Aborted."; nomessage; rendermenu}
+else {$script:quit = $true; logoff; while ([Console]::KeyAvailable) {return}; return}}
+
+'H' {# Help.
+nowarning
+$script:message = "❓ Usage: pwmanage <database.pwdb> <keyfile.key> -noclip`n
+`n
+If no database/keyfile are specified, the defaults `"secure.pwdb`" and `"secure.key`" will be used.`n
+`n
+When a password is retrieved, it will automatically be copied to the clipboard for 30 seconds, unless the -noclip option is used at launch time.`n
+`n
+You can configure the default password, default key file and directories where these are saved by modifying the entries in the `"Secure.psd1`" file located in the same directory as the module.`n
+`n
+You can also set the clipboard timer length, session timer and default expiration time of entries in this file, as well.`n
+`n
+It is of course, best practice to save the key files somewhere distant from the databases. You could even save the database files on cloud storage, but I recommended saving the keys locally.`n
+`n
+The import function is extremely powerful, accepting non-standard fields such as tags and/or notes. Press 'I' in management mode for more details.
+`n
+The initial configurations of the directories within the PSD1 file point to: `"DefaultPowerShellDirectory\Modules\Secure\keys`" and `"DefaultPowerShellDirectory\Modules\Secure\databases`". The term `"DefaultPowerShellDirectory`" though, is a placeholder that is evaluated within the module, redirecting these to your personal PowerShell directory. As stated above, I advise moving these somewhere else once you've setup the database and plan to use it long-term.`n
+`n
+You can now use F4 to disable logging for the currently loaded key, but only while it's loaded."; if ($script:keyexists -eq $false) {$script:warning = "First time use: You will need to create key and database files with the options above. The defaults configured in the PSD1 file use the filename `"secure`" for both."}; rendermenu}
+
+'F1' {# Help.
+nowarning
+$script:message = "❓ Usage: pwmanage <database.pwdb> <keyfile.key> -noclip`n
+`n
+If no database/keyfile are specified, the defaults `"secure.pwdb`" and `"secure.key`" will be used.`n
+`n
+When a password is retrieved, it will automatically be copied to the clipboard for 30 seconds, unless the -noclip option is used at launch time.`n
+`n
+You can configure the default password, default key file and directories where these are saved by modifying the entries in the `"Secure.psd1`" file located in the same directory as the module.`n
+`n
+You can also set the clipboard timer length, session timer and default expiration time of entries in this file, as well.`n
+`n
+It is of course, best practice to save the key files somewhere distant from the databases. You could even save the database files on cloud storage, but I recommended saving the keys locally.`n
+`n
+The import function is extremely powerful, accepting non-standard fields such as tags and/or notes. Press 'I' in management mode for more details.
+`n
+The initial configurations of the directories within the PSD1 file point to: `"DefaultPowerShellDirectory\Modules\Secure\keys`" and `"DefaultPowerShellDirectory\Modules\Secure\databases`". The term `"DefaultPowerShellDirectory`" though, is a placeholder that is evaluated within the module, redirecting these to your personal PowerShell directory. As stated above, I advise moving these somewhere else once you've setup the database and plan to use it long-term.`n
+`n
+You can now use F4 to disable logging for the currently loaded key, but only while it's loaded."; if ($script:keyexists -eq $false) {$script:warning = "First time use: You will need to create key and database files with the options above. The defaults configured in the PSD1 file use the filename `"secure`" for both."}; rendermenu}
+
+'ESCAPE' {# Quit. (Includes funky logic to capture keys after the user confirms.)
+Write-Host -f green "`n`nAre you sure you want to quit? (Y/N) " -n; $confirmquit = Read-Host
+if ($confirmquit -notmatch "^[Yy]$") {$script:warning = "Aborted."; nomessage; rendermenu}
+else {$script:quit = $true; logoff; while ([Console]::KeyAvailable) {return}; return}}
+
+'T' {# Set Timer.
+if (-not $script:keyfile -or -not $script:unlocked) {$script:warning = "You must have a key loaded and unlocked to reset its timer."; nomessage; rendermenu}
+else {$script:unlocked = $false; ""; $key = decryptkey $script:keyfile
+if (-not $script:unlocked) {rendermenu}
+if ($script:unlocked) {Write-Host -f yellow "`nHow many minutes should the session remain unlocked? (1-99) " -n; $usersetminutes = Read-Host; if ($usersetminutes -as [int] -and [int]$usersetminutes -ge 1 -and [int]$usersetminutes -le 99) {$script:timeoutseconds = [int]$usersetminutes * 60; $script:sessionstart = Get-Date; while ([Console]::KeyAvailable) {[Console]::ReadKey($true) > $null}; $script:lastrefresh = 99; rendermenu}
+else {$script:warning = "Invalid timer value set."; nomessage; rendermenu}}}}
+
+'O' {# Reload defaults.
+if (-not $script:database -or -not $script:keyfile) {$script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; ""; $script:key = decryptkey $script:keyfile; 
+if ($script:unlocked) {$script:message = "Defaults successfully loaded and made active."; nowarning; rendermenu}
+else {$script:database = $null; $script:keyfile = $null; rendermenu}}
+else {rendermenu}}
+
+'BACKSPACE' {# Clear messages.
+nomessage; nowarning; rendermenu}
+
+'ENTER' {# Clear messages.
+nomessage; nowarning; rendermenu}
+
+'F4' {# Turn off Logging.
+if ($script:disablelogging) {$script:message = "Logging is already turned off for the current key activity."; nowarning; rendermenu}
+
+else {$proveit = $null; ""; $proveit = decryptkey $script:keyfile
+if (-not $proveit) {$proveit = $null; $script:warning = "Password failed or aborted. Logging is still active."; nomessage; rendermenu}
+if ($proveit) {$script:disablelogging = $true; if ($script:keyfile -match '\\([^\\]+)$') {$shortkey = $matches[1]} ; $script:warning = "Logging turned off for $shortkey @ $(Get-Date)"; nomessage; rendermenu}}}
+
+default {if ($choice.length -gt 0) {$script:warning = "'$choice' is an invalid choice. Try again."}}}
+
 $script:sessionstart = Get-Date  # Reset on key press
 $choice = $null}} while (-not $script:quit)}
 
