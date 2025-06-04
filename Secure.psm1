@@ -146,7 +146,7 @@ $total = $entrymatches.Count
 if (-not $key) {$script:warning = "🔑 No key loaded.`n" + $script:warning; nomessage; return}
 if ($total -eq 0) {$script:warning = "🔐 No password found for the entry '$searchterm'"; nomessage; return}
 elseif ($total -eq 1) {$selected = $entrymatches[0]}
-elseif ($total -le 25) {$invalidentry = "`n" 
+elseif ($total -le 15) {$invalidentry = "`n" 
 do {cls; Write-Host -f yellow "`nMultiple matches found:`n"
 for ($i = 0; $i -lt $total; $i++) {$m = $entrymatches[$i]
 $notesAbbrev = if ($m.Notes.Length -gt 40) {$m.Notes.Substring(0,37) + "..."} else {$m.Notes}; $notesAbbrev = $notesAbbrev -replace "\r?\n?", "";
@@ -401,7 +401,7 @@ catch {return}}}
 $matches = $entries | Where-Object {$_.Title -match $searchterm -or $_.URL -match $searchterm -or $_.Tags -match $searchterm -or $_.Notes -match $searchterm}
 $count = $matches.Count
 if ($count -eq 0) {$script:warning = "No entries found matching '$searchterm'."; nomessage; return}
-elseif ($count -gt 25) {$script:warning = "Too many matches ($count). Please refine your search."; nomessage; return}
+elseif ($count -gt 15) {$script:warning = "Too many matches ($count). Please refine your search."; nomessage; return}
 
 # Select entries.
 if ($count -eq 1) {$selected = $matches[0]}
@@ -505,8 +505,8 @@ startline;  Write-Host -f cyan " V. " -n; Write-Host -f yellow "✅ [V]alidate a
 startline; Write-Host -f cyan " I. " -n; Write-Host -f yellow "📥 [I]mport a CSV plaintext password database.".padright(66) -n; linecap
 horizontal
 startline; Write-Host -f cyan " -. " -n; Write-Host -f white "📤 Export the current database to CSV. " -n; Write-Host -f red "Encryption remains intact. " -n; linecap
-startline; Write-Host -f cyan " >. " -n; Write-Host -f white "📦←︎ Backup currently loaded database and key.".padright(67) -n; linecap
-startline; Write-Host -f cyan " <. " -n; Write-Host -f white "📦→︎ Restore a backup.".padright(67) -n; linecap
+startline; Write-Host -f cyan " .< " -n; Write-Host -f white "📦←︎ Backup currently loaded database and key.".padright(67) -n; linecap
+startline; Write-Host -f cyan " .> " -n; Write-Host -f white "📦→︎ Restore a backup.".padright(67) -n; linecap
 horizontal}
 
 # Session options.
@@ -723,11 +723,11 @@ $fields = $fields -replace "\s*,\s*", ","
 Write-Host -f yellow "`nProceed? (Y/N) " -n; $confirmexport = Read-Host
 if ($confirmexport -match "^[Yy]$") {export $path $fields; rendermenu} else {$script:warning = "Aborted."; nomessage; rendermenu}}
 
-'OEMPERIOD' {# Backup current database and key.
+'OEMCOMMA' {# Backup current database and key.
 managementisdisabled
 backup; rendermenu}
 
-'OEMCOMMA' {# Retore a backup.
+'OEMPERIOD' {# Retore a backup.
 managementisdisabled
 restore; rendermenu}
 
