@@ -502,11 +502,12 @@ startline; Write-Host -f cyan " D. " -n; Write-Host -f white "📑 Select a diff
 startline; Write-Host -f cyan " P. " -n; Write-Host -f yellow "📄 Create a new [P]assword database.".padright(66) -n; linecap
 horizontal
 startline;  Write-Host -f cyan " V. " -n; Write-Host -f yellow "✅ [V]alidate a PWDB file.".padright(65) -n; linecap
-startline; Write-Host -f cyan " I. " -n; Write-Host -f yellow "📥 [I]mport a CSV plaintext password database.".padright(66) -n; linecap
 horizontal
-startline; Write-Host -f cyan " -. " -n; Write-Host -f white "📤 Export the current database to CSV. " -n; Write-Host -f red "Encryption remains intact. " -n; linecap
-startline; Write-Host -f cyan " .< " -n; Write-Host -f white "📦←︎ Backup currently loaded database and key.".padright(67) -n; linecap
-startline; Write-Host -f cyan " .> " -n; Write-Host -f white "📦→︎ Restore a backup.".padright(67) -n; linecap
+startline; Write-Host -f cyan " I. " -n; Write-Host -f yellow "📥 [I]mport a CSV plaintext password database.".padright(66) -n; linecap
+startline; Write-Host -f cyan " -  " -n; Write-Host -f white "📤 Export the current database to CSV. " -n; Write-Host -f red "Encryption remains intact. " -n; linecap
+horizontal
+startline; Write-Host -f cyan " <  " -n; Write-Host -f white "📦←︎ Backup currently loaded database and key.".padright(67) -n; linecap
+startline; Write-Host -f cyan " >  " -n; Write-Host -f white "📦→︎ Restore a backup.".padright(67) -n; linecap
 horizontal}
 
 # Session options.
