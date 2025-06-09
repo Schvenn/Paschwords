@@ -390,8 +390,7 @@ if (-not $script:jsondatabase) {$script:jsondatabase = @()}
 elseif ($script:jsondatabase -isnot [System.Collections.IEnumerable] -or $script:jsondatabase -is [PSCustomObject]) {$script:jsondatabase = @($script:jsondatabase)}
 
 # Add new entry to in-memory database and then to disk.
-$script:jsondatabase += $entry; savetodisk
-read-host "what?"}
+$script:jsondatabase += $entry; savetodisk}
 
 function removeentry ($searchterm) {# Remove an entry.
 
