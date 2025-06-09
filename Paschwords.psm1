@@ -24,7 +24,7 @@ if ($script:database) {if (-not [System.IO.Path]::IsPathRooted($script:database)
 $script:keyexists = $true
 if (-not $script:keyfile) {$script:keyfile = $script:defaultkey}
 if ($script:keyfile -and -not [System.IO.Path]::IsPathRooted($script:keyfile)) {$script:keyfile = Join-Path $script:keydir $script:keyfile}
-if (-not (Test-Path $script:keyfile) -and -not (Test-Path $script:defaultkey)) {$script:keyexists = $false; $script:keyfile = $null; $script:database = $null}}
+if (-not (Test-Path $script:keyfile -ErrorAction SilentlyContinue) -and -not (Test-Path $script:defaultkey -ErrorAction SilentlyContinue)) {$script:keyexists = $false; $script:keyfile = $null; $script:database = $null}}
 
 function clearclipboard ($delayseconds = 30) {# Fill the clipboard with junk and then clear it after a delay.
 Start-Job -ScriptBlock {param($delay, $length); Start-Sleep -Seconds $delay; $junk = -join ((33..126) | Get-Random -Count $length | ForEach-Object {[char]$_}); Set-Clipboard -Value $junk; Start-Sleep -Milliseconds 500; Set-Clipboard -Value $null} -ArgumentList $delayseconds, 64 | Out-Null}
@@ -77,7 +77,7 @@ while ($true); return}
 
 function decryptkey ($keyfile = $script:keyfile) {# Decrypt a keyfile and start session.
 nomessage; nowarning
-if (-not (Test-Path $keyfile)) {$script:warning = "Encrypted key file not found."; nomessage; return}
+if (-not (Test-Path $keyfile -ErrorAction SilentlyContinue)) {$script:warning = "Encrypted key file not found."; nomessage; return}
 $raw = [IO.File]::ReadAllBytes($keyfile); $salt = $raw[0..15]; $iv = $raw[16..31]; $cipher = $raw[32..($raw.Length - 1)]
 
 Write-Host -f green "`n`t🔐 Password: " -n; $secureMaster = Read-Host -AsSecureString; $master = [System.Net.NetworkCredential]::new("", $secureMaster).Password; $pbkdf2 = New-Object Security.Cryptography.Rfc2898DeriveBytes($master, $salt, 10000); $protectKey = $pbkdf2.GetBytes(32)
@@ -1101,8 +1101,8 @@ if ($getdatabase.length -lt 1) {$script:warning = "No filename entered."; nomess
 else {if (-not $getdatabase.EndsWith(".pwdb")) {$getdatabase += ".pwdb"}
 $path = Join-Path $script:databasedir $getdatabase
 if (Test-Path $path) {$script:warning = "File already exists. Choose a different name."; nomessage}
-else {decryptkey; $script:database = $Path
-if (-not ($script:jsondatabase -is [System.Collections.IEnumerable])) {$script:jsondatabase = @()}
+else {$script:jsondatabase = $null; $script:jsondatabase = @(); decryptkey; $script:database = $Path
+#if (-not ($script:jsondatabase -is [System.Collections.IEnumerable])) {$script:jsondatabase = @()}
 savetodisk; $script:message = "📄 New database $getdatabase created."; nowarning}; rendermenu}}
 
 'V' {# Verify a PWDB file.
@@ -1180,11 +1180,13 @@ else {$script:quit = $true; logoff; while ([Console]::KeyAvailable) {return}; re
 
 'H' {# Help.
 nowarning
-helptext; if ($script:keyexists -eq $false) {$script:warning = "First time use: You will need to create key and database files with the menu options above. The defaults configured in the PSD1 file use the filename `"paschwords`" for both."}; rendermenu}
+if ($script:keyexists -eq $false) {$script:warning = "First time use: You will need to create key and database files with the menu options above. The defaults configured in the PSD1 file use the filename 'paschwords' for both."}
+else {helptext}; rendermenu}
 
 'F1' {# Help.
 nowarning
-helptext; if ($script:keyexists -eq $false) {$script:warning = "First time use: You will need to create key and database files with the menu options above. The defaults configured in the PSD1 file use the filename `"paschwords`" for both."}; rendermenu}
+if ($script:keyexists -eq $false) {$script:warning = "First time use: You will need to create key and database files with the menu options above. The defaults configured in the PSD1 file use the filename 'paschwords' for both."}
+else {helptext}; rendermenu}
 
 'ESCAPE' {# Quit. (Includes funky logic to capture keys after the user confirms.)
 Write-Host -f green "`n`nAre you sure you want to quit? (Y/N) " -n; $confirmquit = Read-Host
@@ -1232,7 +1234,7 @@ $choice = $null}} while (-not $script:quit)}
 
 #------------------------ Verify password before allowing access. ---------------------------------
 initialize; setdefaults; login
-if (-not $script:key) {loginfailed}
+if (-not $script:key -and (Test-Path $script:keyfile -ErrorAction SilentlyContinue)) {loginfailed}
 else {loggedin}}
 
 Export-ModuleMember -Function paschwords
