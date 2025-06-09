@@ -1,7 +1,7 @@
 function paschwords ($database = $script:database, $keyfile = $script:keyfile, [switch]$noclip) {# Password Manager.
 
 function initialize {# Load the user configuration.
-$script:powershell = Split-Path $profile; $basemodulepath = Join-Path $script:powershell "Modules\Paschwords"; $script:configpath = Join-Path $basemodulepath "Paschwords.psd1"
+$script:database = $database; $script:keyfile = $keyfile; $script:powershell = Split-Path $profile; $basemodulepath = Join-Path $script:powershell "Modules\Paschwords"; $script:configpath = Join-Path $basemodulepath "Paschwords.psd1"
 if (!(Test-Path $script:configpath)) {throw "Config file not found at $script:configpath"}
 
 $config = Import-PowerShellDataFile -Path $configpath
@@ -175,6 +175,7 @@ $entries = $filtered}
 # Bail out if no entries
 $total = $entries.Count
 if ($total -eq 0) {$script:warning = "No entries to view."; nomessage; rendermenu; return}
+if ($entries -isnot [System.Collections.IEnumerable] -or $entries -is [string]) {$entries = @($entries)}
 
 $page = 0
 while ($true) {cls; if ($sortField) {$entries = if ($descending) {$entries | Sort-Object $sortField -Descending} else {$entries | Sort-Object $sortField}}
@@ -385,8 +386,12 @@ Notes     = $notes
 Created   = (Get-Date).ToString("yyyy-MM-dd")
 Expires   = $expires}
 
+if (-not $script:jsondatabase) {$script:jsondatabase = @()} 
+elseif ($script:jsondatabase -isnot [System.Collections.IEnumerable] -or $script:jsondatabase -is [PSCustomObject]) {$script:jsondatabase = @($script:jsondatabase)}
+
 # Add new entry to in-memory database and then to disk.
-$script:jsondatabase += $entry; savetodisk}
+$script:jsondatabase += $entry; savetodisk
+read-host "what?"}
 
 function removeentry ($searchterm) {# Remove an entry.
 
@@ -571,45 +576,33 @@ Copy-Item $script:database -Destination $tempDir; Copy-Item $script:keyfile -Des
 
 function restore {# Restore a backup.
 $script:message = $null; $script:warning = $null
+$pattern = '^[A-Za-z0-9_]+ \(\d{2}-\d{2}-\d{4} @ \d{2}_\d{2}_\d{2}\)\.zip$'; 
 
-# Find backup files matching "<Name> (mm-dd-yyyy @ hh_mm_ss).zip".
-$pattern = '^[A-Za-z0-9_]+ \(\d{2}-\d{2}-\d{4} @ \d{2}_\d{2}_\d{2}\)\.zip$'
 $backups = Get-ChildItem -Path $script:databasedir -Filter '*.zip' | Where-Object {$_.Name -match $pattern} | Sort-Object Name
-
 if (-not $backups) {$script:warning = "No backup files found in: $script:databasedir"; nomessage; return}
-
-# Present numbered list in cyan (number) / white (filename).
 Write-Host -f yellow "`nAvailable backups:`n"
-for ($i = 0; $i -lt $backups.Count; $i++) {Write-Host -f cyan ("{0}. " -f ($i + 1)) -n; Write-Host  -f white $backups[$i].Name}
-
-# Prompt user for selection.
+for ($i = 0; $i -lt $backups.Count; $i++) {Write-Host -f cyan ("{0}. " -f ($i + 1)) -n; Write-Host -f white $backups[$i].Name}
 Write-Host -f yellow "`nSelect a backup to restore (1-$($backups.Count)) " -n; $selection = Read-Host
 if (-not [int]::TryParse($selection, [ref]$null) -or $selection -lt 1 -or $selection -gt $backups.Count) {$script:warning = "Invalid selection. Restore aborted."; nomessage; return}
 
-$chosenFile = $backups[$selection - 1].FullName
-try {$tempDir = Join-Path $env:TEMP ([Guid]::NewGuid().ToString()); New-Item -ItemType Directory -Path $tempDir | Out-Null; Expand-Archive -Path $chosenFile -DestinationPath $tempDir -Force; $dbLeaf  = Split-Path $script:database -Leaf; $keyLeaf = Split-Path $script:keyfile -Leaf; $extractedDb  = Join-Path $tempDir $dbLeaf; $extractedKey = Join-Path $tempDir $keyLeaf
+$chosenFile = $backups[$selection - 1].FullName; $tempDir = Join-Path $env:TEMP ([Guid]::NewGuid().ToString())
+try {New-Item -ItemType Directory -Path $tempDir | Out-Null; Expand-Archive -Path $chosenFile -DestinationPath $tempDir -Force; $dbFile  = Get-ChildItem -Path $tempDir -Filter '*.pwdb' | Select-Object -First 1; $keyFile = Get-ChildItem -Path $tempDir -Filter '*.key'  | Select-Object -First 1
+if (-not $dbFile -or -not $keyFile) {$script:warning = "Backup is missing required files:`n" + (if (-not $dbFile) { "- Database (.pwdb)`n" } else {""}) + (if (-not $keyFile) { "- Key file (.key)`n" } else {""})
+Remove-Item $tempDir -Recurse -Force; return}
 
-# Restore PWDB.
-$ans = $null
-if (Test-Path $extractedDb) {$destDb = Join-Path $script:databasedir $dbLeaf
-if (Test-Path $destDb) {Write-Host -f red "Overwrite existing database '$dbLeaf'? (Y/N) " -n; $ans = Read-Host
-if ($ans -notmatch '[Yy]$') {$script:warning = "Database file overwrite declined. Restore aborted."; nomessage; Remove-Item $tempDir -Recurse -Force; return}}
-Copy-Item -Path $extractedDb -Destination $script:databasedir -Force}
-else {$script:warning = "Database file '$dbLeaf' not found inside ZIP."; Remove-Item $tempDir -Recurse -Force; return}
+$destDb  = Join-Path $script:databasedir $dbFile.Name; $destKey = Join-Path $script:keydir     $keyFile.Name
+if (Test-Path $destDb) {Write-Host -f red "`nOverwrite existing database '$($dbFile.Name)'? (Y/N) " -n
+if ((Read-Host) -notmatch '[Yy]$') {$script:warning = "Database overwrite declined. Restore aborted."; Remove-Item $tempDir -Recurse -Force; return}}
 
-# Restore Key.
-$ans = $null
-if (Test-Path $extractedKey) {$destKey = Join-Path $script:keydir $keyLeaf
-if (Test-Path $destKey) {Write-Host -f red  "Overwrite existing key file '$keyLeaf'? (Y/N) " -n; $ans = Read-Host
-if ($ans -notmatch '[Yy]$')  {$script:warning = "Key file overwrite declined. Restore aborted."; Remove-Item $tempDir -Recurse -Force; return}}
-Copy-Item -Path $extractedKey -Destination $script:keydir -Force}
-else {$script:warning = "Key file '$keyLeaf' not found inside ZIP."; nomessage; Remove-Item $tempDir -Recurse -Force; return}
+if (Test-Path $destKey) {Write-Host -f red "Overwrite existing key file '$($keyFile.Name)'? (Y/N) " -n
+if ((Read-Host) -notmatch '[Yy]$') {$script:warning = "Key overwrite declined. Restore aborted."; Remove-Item $tempDir -Recurse -Force; return}}
 
-# Cleanup and set success message
+Copy-Item -Path $dbFile.FullName  -Destination $destDb -Force; Copy-Item -Path $keyFile.FullName -Destination $destKey -Force
+
 if ($chosenFile -match '(?i)((\\[^\\]+){2}\\[^\\]+\.ZIP)') {$shortfile = $matches[1]} else {$shortfile = $chosenFile}
-Remove-Item $tempDir -Recurse -Force; $script:message = "Restored '$dbLeaf' and '$keyLeaf' from backup: $shortFile"; nowarning; return}
-catch {$script:warning = "Restore failed:`n$_"; nomessage
-if (Test-Path $tempDir) {Remove-Item $tempDir -Recurse -Force}; return}}
+$script:message = "Restored '$($dbFile.Name)' and '$($keyFile.Name)' from backup: $shortfile"; nowarning}
+catch {$script:warning = "Restore failed:`n$_"; nomessage}
+finally {if (Test-Path $tempDir) {Remove-Item $tempDir -Recurse -Force}}}
 
 function paschwordgenerator ($design, [switch]$regenerate) {# Create an intuitive password
 $specialChars = '~!@#$%^&*_+=.,;:-'.ToCharArray(); $superSpecialChars = '(){}[]'.ToCharArray(); $leetMap = @{'a' = @('@','4'); 'e' = @('3'); 'h' = @('#'); 'l' = @('1','7','!'); 'o' = @('0'); 's' = @('5','$')}
@@ -1077,7 +1070,7 @@ elseif ($script:keyfiles) {Write-Host -f white "`n`n🗝  Available AES Key File
 for ($i = 0; $i -lt $script:keyfiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $script:keyfiles[$i].Name}
 Write-Host -f green "`n🗝  Enter number of the key file to use: " -n; $sel = Read-Host
 if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $script:keyfiles.Count) {$script:keyfile = $script:keyfiles[$sel - 1].FullName; $script:keyexists = $true; nowarning; neuralizer; $key = decryptkey $script:keyfile; if ($script:keyfile -match '(?i)((\\[^\\]+){2}\\\w+\.KEY)') {$shortkey = $matches[1]} else {$shortkey = $script:keyfile} $script:message = "$shortkey selected and made active."; $script:disablelogging = $false
-if (-not $key) {$script:warning += " Key decryption failed. Aborting."; nomessage}}}; rendermenu}
+if (-not $script:key) {$script:warning += " Key decryption failed. Aborting."; nomessage}}}; rendermenu}
 
 'C' {# Create a new password encryption key.
 managementisdisabled
@@ -1093,7 +1086,7 @@ if (-not $dbFiles) {$script:warning = "No .pwdb files found."; nomessage; render
 else {Write-Host -f white "`n`n📑 Available Password Databases:"; Write-Host -f yellow ("-" * 70)
 for ($i = 0; $i -lt $dbFiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $dbFiles[$i].Name}
 Write-Host -f green "`n📑 Enter number of the database file to use: " -n; $sel = Read-Host
-if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $dbFiles.Count) {$script:database = $dbFiles[$sel - 1].FullName; $dbloaded = $script:database -replace '.+\\Modules\\', ''; $script:message = "$dbloaded selected and made active."; nowarning}
+if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $dbFiles.Count) {$script:jsondatabase = $null; $script:database = $dbFiles[$sel - 1].FullName; $dbloaded = $script:database -replace '.+\\Modules\\', ''; loadjson; $script:message = "$dbloaded selected and made active."; nowarning}
 else {$script:warning = "Invalid selection."; nomessage}; rendermenu}}
 
 'P' {# Create a new password database.
