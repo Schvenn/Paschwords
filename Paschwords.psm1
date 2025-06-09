@@ -463,6 +463,9 @@ function importcsv ($csvpath) {# Import a CSV file into the database.
 $key = decryptkey $script:keyfile
 if (-not $script:key) {$script:warning = "Key decryption failed. Aborting import."; nomessage; return}
 
+# Ensure the database is initialized. This is needed for new, empty databases.
+$script:jsondatabase = @()
+
 # Import CSV file.
 $imported = Import-Csv $csvpath; $requiredFields = @('Title', 'Username', 'Password', 'URL'); $optionalFields = @('Tags','Notes','Created','Expires')
 
@@ -1098,7 +1101,9 @@ if ($getdatabase.length -lt 1) {$script:warning = "No filename entered."; nomess
 else {if (-not $getdatabase.EndsWith(".pwdb")) {$getdatabase += ".pwdb"}
 $path = Join-Path $script:databasedir $getdatabase
 if (Test-Path $path) {$script:warning = "File already exists. Choose a different name."; nomessage}
-else {New-Item -Path $path -ItemType File | Out-Null; if ($script:database -match '(?i)((\\[^\\]+){2}\\\w+\.PWDB)') {$shortdb = $matches[1]} else {$shortdb = $script:database}; $script:message = "$shortdb created and made active."; nowarning; $script:database = $path}; rendermenu}}
+else {decryptkey; $script:database = $Path
+if (-not ($script:jsondatabase -is [System.Collections.IEnumerable])) {$script:jsondatabase = @()}
+savetodisk; $script:message = "📄 New database $getdatabase created."; nowarning}; rendermenu}}
 
 'V' {# Verify a PWDB file.
 managementisdisabled
