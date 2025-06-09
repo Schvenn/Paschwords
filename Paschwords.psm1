@@ -2,17 +2,26 @@ function paschwords ($database = $script:database, $keyfile = $script:keyfile, [
 
 function initialize {# Load the user configuration.
 $script:database = $database; $script:keyfile = $keyfile; $script:powershell = Split-Path $profile; $basemodulepath = Join-Path $script:powershell "Modules\Paschwords"; $script:configpath = Join-Path $basemodulepath "Paschwords.psd1"
-if (!(Test-Path $script:configpath)) {throw "Config file not found at $script:configpath"}
 
+if (!(Test-Path $script:configpath)) {throw "Config file not found at $script:configpath"}
 $config = Import-PowerShellDataFile -Path $configpath
+
+# Initialize Key and Database.
 $script:keydir = $config.PrivateData.keydir; $script:defaultkey = $config.PrivateData.defaultkey; $script:keydir = $script:keydir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:defaultkey = Join-Path $script:keydir $script:defaultkey
+
 $script:databasedir = $config.PrivateData.databasedir; $script:defaultdatabase = $config.PrivateData.defaultdatabase; $script:databasedir = $script:databasedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:defaultdatabase = Join-Path $script:databasedir $script:defaultdatabase
+
+# Import PSD1 Settings.
 $script:delayseconds = $config.PrivateData.delayseconds
 $script:timeoutseconds = $config.PrivateData.timeoutseconds; if ([int]$script:timeoutseconds -gt 5940) {$script:timeoutseconds = 5940}
 $script:timetobootlimit = $config.PrivateData.timetobootlimit#; if ([int]$script:timetobootlimit -gt 120) {$script:timetobootlimit = 120}
 $script:expirywarning = $config.PrivateData.expirywarning; if ([int]$script:expirywarning -gt 365) {$script:expirywarning = 365}
 $script:logretention = $config.PrivateData.logretention; if ([int]$script:logretention -lt 30) {$script:logretention = 30}
 $script:dictionaryfile = $config.PrivateData.dictionaryfile; $script:dictionaryfile = Join-Path $basemodulepath $script:dictionaryfile
+$script:backupfrequency = $config.PrivateData.backupfrequency
+$script:archiveslimit = $config.PrivateData.archiveslimit
+
+# Initialize non-PSD1 variables.
 $script:message = $null; $script:warning = $null; neuralizer; $script:sessionstart = Get-Date; $script:lastrefresh = 1000; $script:management = $false; $script:quit = $false; $script:timetoboot = $null; $script:noclip = $noclip}
 
 function setdefaults {# Set Key and Database defaults.
@@ -571,7 +580,26 @@ function backup {# Backup currently loaded key and database pair to the database
 $script:message = $null; $script:warning = $null; $baseName = [System.IO.Path]::GetFileNameWithoutExtension($script:database); $timestamp = Get-Date -Format "MM-dd-yyyy @ HH_mm_ss"; $zipName = "$baseName ($timestamp).zip"; $zipPath = Join-Path $script:databasedir $zipName
 
 try {$tempDir = Join-Path $env:TEMP ([System.Guid]::NewGuid().ToString()); New-Item -ItemType Directory -Path $tempDir | Out-Null
-Copy-Item $script:database -Destination $tempDir; Copy-Item $script:keyfile -Destination $tempDir; Compress-Archive -Path (Join-Path $tempDir '*') -DestinationPath $zipPath -Force; Remove-Item $tempDir -Recurse -Force; $script:message = "Backup created: $zipName"; nowarning} catch {$script:warning = "Backup failed: $_"; nomessage}; return}
+Copy-Item $script:database -Destination $tempDir; Copy-Item $script:keyfile -Destination $tempDir; Compress-Archive -Path (Join-Path $tempDir '*') -DestinationPath $zipPath -Force; Remove-Item $tempDir -Recurse -Force; $script:message = $script:message + "`nBackup created: $zipName"; nowarning} catch {$script:warning = "Backup failed: $_"; nomessage}; return}
+
+function scheduledbackup {# Run backup according to PSD1 settings.
+$baseName = [System.IO.Path]::GetFileNameWithoutExtension($script:database)
+$backups = Get-ChildItem -Path $script:databasedir -File "*.zip" -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "$baseName*(*@*).zip" }
+$needBackup = $true
+$newest = $backups | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+if ($newest) {$age = (Get-Date) - $newest.LastWriteTime
+if ($age.TotalDays -lt $script:backupfrequency) {$needBackup = $false}}
+
+if ($needBackup) {Write-Host -f darkgray "💾 Creating new backup..."; backup}
+else {$script:message = $script:message + "`n🕒 No scheduled backup is currently required."; nowarning; rendermenu}
+
+# Enforce archive limit
+$backups = Get-ChildItem -Path $script:databasedir -File "$baseName*(*.zip)" -File -ErrorAction SilentlyContinue
+$sortedBackups = $backups | Sort-Object LastWriteTime -Descending
+if ($sortedBackups.Count -gt $script:archiveslimit) {$toDelete = $sortedBackups | Select-Object -Skip $script:archiveslimit
+foreach ($file in $toDelete) {try {Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop; $script:message = $script:message + "`n🗑️ Deleted old backup: $($file.Name)"; nowarning}
+catch {$script:warning = "⚠️ Failed to delete: $($file.FullName) - $_"}}}; rendermenu; return}
 
 function restore {# Restore a backup.
 $script:message = $null; $script:warning = $null
@@ -828,8 +856,8 @@ elseif ($choice -eq 'V') {$script:emoji = "✅ Verify a database"}
 elseif ($choice -eq 'I') {$script:emoji = "📥 Import from CSV"}
 elseif ($choice -eq 'OEMMINUS') {$script:emoji = "📤 Export to CSV"}
 elseif ($choice -eq 'SUBTRACT') {$script:emoji = "📤 Export to CSV"}
-elseif ($choice -eq 'OEMPERIOD') {$script:emoji = "📦←︎ Backup"}
-elseif ($choice -eq 'OEMCOMMA') {$script:emoji = "📦→︎ Restore"}
+elseif ($choice -eq 'OEMCOMMA') {$script:emoji = "📦←︎ Backup"}
+elseif ($choice -eq 'OEMPERIOD') {$script:emoji = "📦→︎ Restore"}
 elseif ($choice.length -gt 1) {$script:emoji = ""}
 else {$script:emoji = $choice}
 return $script:emoji}
@@ -966,6 +994,7 @@ function loggedin {# Once key is unlocked, allow access to the dynamic menu.
 $script:sessionstart = Get-Date; $choice = $null
 loadjson
 rendermenu
+scheduledbackup
 
 # Combine previous day's log files into single date files and remove old log files.
 $today = (Get-Date).Date
@@ -1215,7 +1244,7 @@ if ($proveit) {$script:disablelogging = $true; if ($script:keyfile -match '\\([^
 
 'F9' {# Configuration Details
 $fixedkeydir = $keydir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $fixeddatabasedir = $databasedir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $configfileonly = $script:configpath -replace '.+\\', ''; $keyfileonly = $defaultkey -replace '.+\\', ''; $databasefileonly = $defaultdatabase -replace '.+\\', ''; $dictionaryfileonly = $dictionaryfile -replace '.+\\', ''; $timeoutminutes = [math]::Floor($timeoutseconds / 60)
-$script:message = "Configuration Details:`n`nConfiguration File Path: $configfileonly`nDefault Key:             $keyfileonly`nDefault Database:        $databasefileonly`nDictionary File:         $dictionaryfileonly`n`nSession Inactivity Timer: $timeoutseconds seconds / $timeoutminutes minutes`nScript Inactivity Timer:  $script:timetobootlimit minutes`nClipboard Timer:          $delayseconds seconds`nEntry Expiration Warning: $expirywarning days`nLog Retention:            $logretention days`n`nDirectories:`n$fixedkeydir`n$fixeddatabasedir"; nowarning; rendermenu}
+$script:message = "Configuration Details:`n`nConfiguration File Path: $configfileonly`nDefault Key:             $keyfileonly`nDefault Database:        $databasefileonly`nDictionary File:         $dictionaryfileonly`n`nSession Inactivity Timer: $timeoutseconds seconds / $timeoutminutes minutes`nScript Inactivity Timer:  $script:timetobootlimit minutes`nClipboard Timer:          $delayseconds seconds`nEntry Expiration Warning: $expirywarning days`nLog Retention:            $logretention days`nBackup Frequency:         $script:backupfrequency days`nArchives Limit:           $script:archiveslimit ZIP files`n`nDirectories:`n$fixedkeydir`n$fixeddatabasedir"; nowarning; rendermenu}
 
 'F10' {# Test function while development.
 "";""; sometestfunction; Read-Host; rendermenu}
@@ -1264,6 +1293,8 @@ You can configure the following items in the accomanying PSD1 file:
 • The clipboard time out represents the number of seconds a retrieved password will remain in the clipboard memory before being overwritten with junk information and then cleared. Incidentally, the copy to clipboard feature can be disabled at launch by using the -noclip function, but can by also be toggled inside the function.
 
 • The default expiration value represents the number of days after creation date that an entry will enter the reminder pool. This in no way modifies the entries. It just presents a recommended date for updating passwords. The default is set to the 365 days maximum that is allowed. Values less than this can of course be set. 60 days for example, is common in corporate environments.
+
+• The Backup frequency sets the number of days between backups and the Archives limit sets the maximum number of backups to keep for each database and key combination.
 
 • Log retention defaults to 30 days. This is also the minimum allowed, but there is no upper limit.
 
