@@ -17,12 +17,12 @@ $script:message = $null; $script:warning = $null; neuralizer; $script:sessionsta
 
 function setdefaults {# Set Key and Database defaults.
 # Check database validity.
-if (-not $script:database) {$script:database = $script:defaultdatabase}
+if (-not $script:database -or -not (Test-Path $script:database -ErrorAction SilentlyContinue)) {$script:database = $script:defaultdatabase}
 if ($script:database) {if (-not [System.IO.Path]::IsPathRooted($script:database)) {$script:database = Join-Path $script:databasedir $script:database}}
 
 # Check key validity, but allow the menu to load, even if there is no default key.
 $script:keyexists = $true
-if (-not $script:keyfile) {$script:keyfile = $script:defaultkey}
+if (-not $script:keyfile -or -not (Test-Path $script:keyfile -ErrorAction SilentlyContinue)) {$script:keyfile = $script:defaultkey}
 if ($script:keyfile -and -not [System.IO.Path]::IsPathRooted($script:keyfile)) {$script:keyfile = Join-Path $script:keydir $script:keyfile}
 if (-not (Test-Path $script:keyfile -ErrorAction SilentlyContinue) -and -not (Test-Path $script:defaultkey -ErrorAction SilentlyContinue)) {$script:keyexists = $false; $script:keyfile = $null; $script:database = $null}}
 
@@ -1069,7 +1069,7 @@ if (-not $script:keyfiles) {$script:warning = "No .key files found."; nomessage;
 elseif ($script:keyfiles) {Write-Host -f white "`n`n🗝  Available AES Key Files:"; Write-Host -f yellow ("-" * 70)
 for ($i = 0; $i -lt $script:keyfiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $script:keyfiles[$i].Name}
 Write-Host -f green "`n🗝  Enter number of the key file to use: " -n; $sel = Read-Host
-if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $script:keyfiles.Count) {$script:keyfile = $script:keyfiles[$sel - 1].FullName; $script:keyexists = $true; nowarning; neuralizer; $key = decryptkey $script:keyfile; if ($script:keyfile -match '(?i)((\\[^\\]+){2}\\\w+\.KEY)') {$shortkey = $matches[1]} else {$shortkey = $script:keyfile} $script:message = "$shortkey selected and made active."; $script:disablelogging = $false
+if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $script:keyfiles.Count) {$script:keyfile = $script:keyfiles[$sel - 1].FullName; $script:keyexists = $true; nowarning; neuralizer; $key = decryptkey $script:keyfile; if ($script:keyfile -match '(?i)((\\[^\\]+){2}\\\w+\.KEY)') {$shortkey = $matches[1]} else {$shortkey = $script:keyfile} $script:message = "$shortkey selected and made active."; $script:warning = "If changing database and key combinations, always load the key before the database."; $script:disablelogging = $false
 if (-not $script:key) {$script:warning += " Key decryption failed. Aborting."; nomessage}}}; rendermenu}
 
 'C' {# Create a new password encryption key.
@@ -1086,7 +1086,7 @@ if (-not $dbFiles) {$script:warning = "No .pwdb files found."; nomessage; render
 else {Write-Host -f white "`n`n📑 Available Password Databases:"; Write-Host -f yellow ("-" * 70)
 for ($i = 0; $i -lt $dbFiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $dbFiles[$i].Name}
 Write-Host -f green "`n📑 Enter number of the database file to use: " -n; $sel = Read-Host
-if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $dbFiles.Count) {$script:jsondatabase = $null; $script:database = $dbFiles[$sel - 1].FullName; $dbloaded = $script:database -replace '.+\\Modules\\', ''; loadjson; $script:message = "$dbloaded selected and made active."; nowarning}
+if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $dbFiles.Count) {$script:jsondatabase = $null; $script:database = $dbFiles[$sel - 1].FullName; $dbloaded = $script:database -replace '.+\\Modules\\', ''; loadjson; $script:message = "$dbloaded selected and made active."; $script:warning = "If changing database and key combinations, always load the key before the database."}
 else {$script:warning = "Invalid selection."; nomessage}; rendermenu}}
 
 'P' {# Create a new password database.
