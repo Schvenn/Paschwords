@@ -915,7 +915,9 @@ startline; if ($script:unlocked -eq $true) {Write-Host "🔓 " -n} else {Write-H
 if ($script:unlocked -eq $true) {Write-Host -f red "[L]ock Session " -n} else {Write-Host -f darkgray "[L]ock Session " -n}
 Write-Host -f white "/ " -n;
 if ($script:unlocked -eq $true) {Write-Host -f darkgray "[U]nlock Session".padright(23) -n} else {Write-Host -f green "[U]nlock Session".padright(23) -n}
-Write-Host -f yellow "❓ [H]elp.".padright(17) -n; Write-Host -f gray "⏏️ [ESC] " -n;; linecap
+if (-not (Test-Path $script:keyfile -ErrorAction SilentlyContinue)) {Write-Host -f black -b yellow "❓ [H]elp <-- " -n; Write-Host "".padright(4) -n}
+else {Write-Host -f yellow "❓ [H]elp".padright(17) -n}
+Write-Host -f gray "⏏️ [ESC] " -n;; linecap
 endcap
 
 # Message and warning center.
