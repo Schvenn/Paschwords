@@ -1068,7 +1068,7 @@ if (-not $script:keyfiles) {$script:warning = "No .key files found."; nomessage;
 elseif ($script:keyfiles) {Write-Host -f white "`n`n🗝  Available AES Key Files:"; Write-Host -f yellow ("-" * 70)
 for ($i = 0; $i -lt $script:keyfiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $script:keyfiles[$i].Name}
 Write-Host -f green "`n🗝  Enter number of the key file to use: " -n; $sel = Read-Host
-if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $script:keyfiles.Count) {$script:keyfile = $script:keyfiles[$sel - 1].FullName; $script:keyexists = $true; nowarning; neuralizer; $key = decryptkey $script:keyfile; if ($script:keyfile -match '(?i)((\\[^\\]+){2}\\\w+\.KEY)') {$shortkey = $matches[1]} else {$shortkey = $script:keyfile} $script:message = "$shortkey selected and made active."; $script:warning = "If changing database and key combinations, always load the key before the database."; $script:disablelogging = $false
+if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $script:keyfiles.Count) {$script:keyfile = $script:keyfiles[$sel - 1].FullName; $script:keyexists = $true; nowarning; neuralizer; $key = decryptkey $script:keyfile; if ($script:keyfile -match '(?i)((\\[^\\]+){2}\\\w+\.KEY)') {$shortkey = $matches[1]} else {$shortkey = $script:keyfile} $script:message = "$shortkey selected and made active."; nowarning; $script:disablelogging = $false
 if (-not $script:key) {$script:warning += " Key decryption failed. Aborting."; nomessage}}}; rendermenu}
 
 'C' {# Create a new password encryption key.
@@ -1085,7 +1085,7 @@ if (-not $dbFiles) {$script:warning = "No .pwdb files found."; nomessage; render
 else {Write-Host -f white "`n`n📑 Available Password Databases:"; Write-Host -f yellow ("-" * 70)
 for ($i = 0; $i -lt $dbFiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $dbFiles[$i].Name}
 Write-Host -f green "`n📑 Enter number of the database file to use: " -n; $sel = Read-Host
-if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $dbFiles.Count) {$script:jsondatabase = $null; $script:database = $dbFiles[$sel - 1].FullName; $dbloaded = $script:database -replace '.+\\Modules\\', ''; loadjson; $script:message = "$dbloaded selected and made active."; $script:warning = "If changing database and key combinations, always load the key before the database."}
+if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $dbFiles.Count) {$script:jsondatabase = $null; $script:database = $dbFiles[$sel - 1].FullName; $dbloaded = $script:database -replace '.+\\Modules\\', ''; loadjson; $script:message = "$dbloaded selected and made active."; if ($script:jsondatabase.Count -eq 0) {$script:warning = "If changing database and key combinations, always load the key before the database."} else {nowarning}}
 else {$script:warning = "Invalid selection."; nomessage}; rendermenu}}
 
 'P' {# Create a new password database.
