@@ -347,7 +347,7 @@ function newentry ($database = $script:database, $keyfile = $script:keyfile) {# 
 $answer = $null; $confirmDup = $null
 
 # Prompt for fields.
-Write-Host -f yellow "`n`n📜 Enter Title: " -n; $title = Read-Host
+Write-Host -f yellow "`n📜 Enter Title: " -n; $title = Read-Host
 if (-not $title) {$script:warning = "Every entry must have a Title, as well as a Username and URL. Aborted."; nomessage; rendermenu; return}
 Write-Host -f yellow "🆔 Username: " -n; $username = Read-Host
 if (-not $username) {$script:warning = "Every entry must have a Username, as well as a Title and URL. Aborted."; nomessage; rendermenu; return}
@@ -421,6 +421,72 @@ elseif ($script:jsondatabase -isnot [System.Collections.IEnumerable] -or $script
 
 # Add new entry to in-memory database and then to disk.
 $script:jsondatabase += $entry; savetodisk}
+
+function updateentry ($database = $script:jsondatabase, $keyfile = $script:keyfile, $searchterm) {# Find and update an existing entry.
+
+# Validate search term
+if (-not $searchterm -or $searchterm.Length -lt 3) {$script:warning = "Search term too short. Use 3 or more characters."; nomessage; rendermenu; return}
+
+# Load key if needed
+$key = if ($script:unlocked) {$script:realKey} else {decryptkey $keyfile; nowarning; nomessage}
+if (-not $script:key) {$script:warning = "🔑 No key loaded."; rendermenu; return}
+
+# Match entries by Title, Username, URL, Tags, Notes
+$entryMatches  = @(); foreach ($entry in $database) {if ($entry.Title -match $searchterm -or $entry.Username -match $searchterm -or $entry.URL -match $searchterm -or $entry.Tags -match $searchterm -or $entry.Notes -match $searchterm) {$entryMatches  += $entry}}
+
+# Handle results
+if ($entryMatches.Count -eq 0) {$script:warning = "No entry found matching '$searchterm'."; nomessage; rendermenu; return}
+elseif ($entryMatches.Count -gt 1) {$script:warning = "Multiple entries found ($($entryMatches.Count)). Please refine your search."; nomessage; rendermenu; return}
+
+# Get password.
+$passwordplain = decryptpassword $entry.Password
+
+Write-Host -f cyan "`nUpdate Entry:"
+Write-Host -f yellow ("-" * 36)
+
+$entry = $entryMatches[0]
+Write-Host -f white "🗓️ Created:  $($entry.Created)`n⌛ Expires:  $($entry.Expires)`n📜 Title:    $($entry.Title)`n🆔 UserName: $($entry.Username)`n🔐 Password: $passwordplain`n🔗 URL:      $($entry.URL)`n🏷️ Tags:     $($entry.Tags)`n------------------------------------`n📝 Notes:`n`n$($entry.Notes)"
+
+# Prompt user for updated values
+Write-Host -f yellow "`n📝 Update entry fields. Leave blank to keep the current value."
+$title     = Read-Host "`n📜 Title ($($entry.Title))"
+$username  = Read-Host "🆔 Username ($($entry.Username))"
+
+# Password choice
+Write-Host -f yellow "🔐 Do you want to update the password? (Y/N) " -n; $updatepass = Read-Host
+if ($updatepass -match '^[Yy]') {Write-Host -f yellow "Use Paschword generator? (Y/N) " -n; $gen = Read-Host
+if ($gen -match '^[Yy]') {$passplain = paschwordgenerator; Write-Host -f yellow "Accept password? (Y/N) " -n; $accept = Read-Host
+while ($accept -match '^[Nn]') {$passplain = paschwordgenerator -regenerate; Write-Host -f yellow "Accept password? (Y/N) " -n; $accept = Read-Host}}
+else {Write-Host -f yellow "🔐 Password: " -n; $pass = Read-Host -AsSecureString
+try {$passplain = [System.Net.NetworkCredential]::new("", $pass).Password} catch {$passplain = ""}}
+try {$secure = encryptpassword $passplain $key} catch {$script:warning = "Password encryption failed."; nomessage; rendermenu; return}}
+else {$secure = $entry.Password}
+
+$url       = Read-Host "🔗 URL ($($entry.URL))"
+$expireIn  = Read-Host "⏳ Days before expiry (default: keep $($entry.Expires))"
+$tags      = Read-Host "🏷️ Tags ($($entry.Tags))"
+Write-Host -f yellow "📝 Notes (CTRL-Z + Enter to end, or leave blank): " -n
+$notesIn = [Console]::In.ReadToEnd()
+
+# Expiration logic
+if ([int]::TryParse($expireIn, [ref]$null)) {$expireDays = [int]$expireIn
+if ($expireDays -le 0) {$expireDays = 365}
+$expires = (Get-Date).AddDays($expireDays).ToString("yyyy-MM-dd")}
+else {$expires = $entry.Expires}
+
+# Apply updated values
+$entry.Title = if ($title) {$title} else {$entry.Title}
+$entry.Username = if ($username) {$username} else {$entry.Username}
+$entry.Password = $secure
+$entry.URL = if ($url) {$url} else {$entry.URL}
+$entry.Tags = if ($tags) {($tags -split ',') | ForEach-Object {$_.Trim()} | Where-Object {$_} | Join-String -Separator ', '} else {$entry.Tags}
+$entry.Notes = if ($notesIn) {$notesIn} else {$entry.Notes}
+$entry.Expires = $expires
+$entry.Created = Get-Date -Format "yyyy-MM-dd"
+
+# Save and confirm
+$script:jsondatabase = $database
+$script:message = "`n✅ Entry successfully updated."; nowarning; savetodisk; rendermenu}
 
 function removeentry ($searchterm) {# Remove an entry.
 
@@ -750,7 +816,7 @@ default {Write-Host -f magenta $_ -n}}}
 Write-Host -f darkgray ")"; Write-Host -f darkgray ("-" * 100)}
 
 # Parse input.
-$script:design
+$null = $script:design
 $flagsRaw = ($script:design -replace '\d','').ToCharArray(); $length = [int]($script:design -replace '\D','')
 if (-not $length -and $script:design -match 'P') {$length = 4}
 elseif (-not $length) {$length = 8}
@@ -1096,9 +1162,12 @@ if ([Console]::KeyAvailable -and -not $script:quit) {$key = [Console]::ReadKey($
 logchoices $choice $script:message $script:warning
 switch ($choice) {
 'A' {# Add a new entry.
-if ($script:database -and $script:keyfile -and $script:unlocked) {newentry $script:database $script:keyfile; rendermenu}
-else {$script:warning = "A database and key must be opened and unlocked to add an entry."; nomessage}
-rendermenu}
+if ($script:database -and $script:keyfile -and $script:unlocked) {$addorupdate = $null; Write-Host -f yellow "`n`nAdd a new entry, or Update an existing one? (Add/Update) " -n; $addorupdate = Read-Host
+if ($addorupdate -match "(?i)a(dd)?") {newentry $script:database $script:keyfile; rendermenu}
+elseif ($addorupdate -match "(?i)u(pdate)?") {Write-Host -f green "`n🔓 Enter Title, 🆔 Username, 🔗 URL, 🏷  Tag or 📝 Note to identify entry: " -n; $searchterm = Read-Host
+if ([string]::IsNullOrWhiteSpace($searchterm)) {$script:warning = "No search term provided."; nomessage; rendermenu}
+elseif ($searchterm) {updateentry $script:jsondatabase $script:keyfile $searchterm}}}
+else {$script:warning = "A database and key must be opened and unlocked to add an entry."; nomessage; rendermenu}}
 
 'R' {# Retrieve an entry.
 if (-not $script:keyfile) {$script:warning = "🔑 No key loaded."; nomessage}
