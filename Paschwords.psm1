@@ -12,6 +12,7 @@ $script:keydir = $config.PrivateData.keydir; $script:defaultkey = $config.Privat
 $script:databasedir = $config.PrivateData.databasedir; $script:defaultdatabase = $config.PrivateData.defaultdatabase; $script:databasedir = $script:databasedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:defaultdatabase = Join-Path $script:databasedir $script:defaultdatabase
 
 # Import PSD1 Settings.
+$script:version = $config.ModuleVersion
 $script:delayseconds = $config.PrivateData.delayseconds
 $script:timeoutseconds = $config.PrivateData.timeoutseconds; if ([int]$script:timeoutseconds -gt 5940) {$script:timeoutseconds = 5940}
 $script:timetobootlimit = $config.PrivateData.timetobootlimit#; if ([int]$script:timetobootlimit -gt 120) {$script:timetobootlimit = 120}
@@ -321,7 +322,7 @@ if (-not $script:jsondatabase) {$script:warning = "No database content is curren
 $validfields = 'Title','Username','Password','URL','Tags','Notes','Created','Expires'
 $fieldList = $fields -split ',' | ForEach-Object {$_.Trim()}
 $invalidfields = $fieldList | Where-Object {$_ -notin $validfields}
-if ($invalidfields) {$script:warning = "Invalid field(s): $($invalidfields -join ', ')"; $script:message = "Allowed fields: $($validfields -join ', ')"; return}
+if ($invalidfields) {$script:warning = "Invalid field(s): $($invalidfields -join ', ')"; $script:message = "Allowed fields: $($validfields -join ', ')"; rendermenu; return}
 
 # $script:jsondatabase is assumed to be an array of objects (already parsed JSON)
 $filtered = $script:jsondatabase | ForEach-Object {$obj = [ordered]@{}
@@ -999,7 +1000,7 @@ function linecap {Write-Host -f cyan "|"}
 
 # Title and countdown timer.
 cls; ""; endcap
-startline; Write-Host -f white "🔑 Secure Paschwords Manager 🔒".padright(53) -n
+startline; Write-Host -f white "🔑 Secure Paschwords Manager v$script:version 🔒".padright(53) -n
 if ($script:unlocked) {if ($countdown -ge 540) {Write-Host -f green "🔒 in $($script:minutes +1) minutes " -n}
 elseif ($countdown -lt 540 -and $countdown -ge 60) {Write-Host -f green " 🔒 in $($script:minutes +1) minutes " -n}
 elseif ($countdown -lt 60) {Write-Host -f red -n ("      🔒 in 0:{0:D2} " -f $script:seconds)}
@@ -1013,9 +1014,9 @@ if ($script:keyfile) {$displaykey = Split-Path -Leaf $script:keyfile -ErrorActio
 $databasestatus = if ($db -and $key -and $db -ne $key) {"🤔"} elseif ($displaykey -eq "none loaded" -or $displaydatabase -eq "none loaded" -or $script:unlocked -eq $false) {"🔒"} else {"🔓"}
 $keystatus = if ($script:unlocked -eq $false -or $displaykey -eq "none loaded") {"🔒"} else {"🔓"}
 
-startline; Write-Host -f white " Current Database: " -n; Write-Host -f green "$displaydatabase $databasestatus".padright(34) -n
+startline; Write-Host -f white " Current database: " -n; Write-Host -f green "$displaydatabase $databasestatus".padright(34) -n
 Write-Host -f yellow "⏱️ [T]imer reset." -n; linecap
-startline; Write-Host -f white " Current Key: " -n; Write-Host -f green "$displaykey $keystatus".padright(35) -n
+startline; Write-Host -f white " Current key: " -n; Write-Host -f green "$displaykey $keystatus".padright(35) -n
 if ($displaydatabase -eq "none loaded" -or $displaykey -eq "none loaded") {Write-Host -f green "♻️ Rel[O]ad defaults." -n} else {Write-Host (" " * 21) -n};linecap
 
 if ($displaydatabase -match '^(?i)(.+?)\.pwdb$') {$db = $matches[1]}
@@ -1036,8 +1037,8 @@ $now = Get-Date; $expiredcount = ($script:jsondatabase | Where-Object {$_.Expire
 startline; Write-Host -f cyan " E. " -n; Write-Host -f white "⌛ [E]xpired entries view: " -n; if ($expiredcount -eq 0) {Write-Host -f green "0".padright(39) -n} else {Write-Host -f red "$expiredcount".padright(39) -n}; linecap
 startline; Write-Host -f cyan " S. " -n; Write-Host -f white "🔍 [S]earch entries for specific keywords.".padright(66) -n; linecap
 startline; Write-Host -f cyan "   1. " -n; Write-Host -f white "🖥  [1] Find IPs.".padright(65) -n; linecap
-startline; Write-Host -f cyan "   2. " -n; Write-Host -f white "👎 [2] Find Invalid URLs.".padright(64) -n; linecap
-startline; Write-Host -f cyan "   3. " -n; Write-Host -f white "🌐 [3] Find Valid URLs.".padright(64) -n; linecap
+startline; Write-Host -f cyan "   2. " -n; Write-Host -f white "👎 [2] Find invalid URLs.".padright(64) -n; linecap
+startline; Write-Host -f cyan "   3. " -n; Write-Host -f white "🌐 [3] Find valid URLs.".padright(64) -n; linecap
 
 horizontal
 startline; Write-Host -f cyan " M. " -n; Write-Host -f white "🛠️ [M]anagement controls: " -n; Write-Host -f $managementcolour $toggle.padright(40) -n; linecap
@@ -1048,20 +1049,20 @@ horizontal
 startline; Write-Host -f cyan " D. " -n; Write-Host -f white "📑 Select a different password [D]atabase.".padright(66) -n; linecap
 startline; Write-Host -f cyan " P. " -n; Write-Host -f yellow "📄 Create a new [P]assword database.".padright(66) -n; linecap
 horizontal
-startline;  Write-Host -f cyan " V. " -n; Write-Host -f yellow "✅ [V]alidate a PWDB file.".padright(65) -n; linecap
+startline;  Write-Host -f cyan " V. " -n; Write-Host -f white "✅ [V]alidate a PWDB file.".padright(65) -n; linecap
 horizontal
 startline; Write-Host -f cyan " I. " -n; Write-Host -f yellow "📥 [I]mport a CSV plaintext password database.".padright(66) -n; linecap
 startline; Write-Host -f cyan " -  " -n; Write-Host -f white "📤 Export the current database to CSV. " -n; Write-Host -f red "Encryption remains intact. " -n; linecap
 horizontal
-startline; Write-Host -f cyan " <  " -n; Write-Host -f white "📦←︎ Backup currently loaded database and key.".padright(67) -n; linecap
-startline; Write-Host -f cyan " >  " -n; Write-Host -f white "📦→︎ Restore a backup.".padright(67) -n; linecap
+startline; Write-Host -f cyan " <  " -n; Write-Host -f darkgreen "📦←︎ Backup currently loaded database and key.".padright(67) -n; linecap
+startline; Write-Host -f cyan " >  " -n; Write-Host -f darkcyan "📦→︎ Restore a backup.".padright(67) -n; linecap
 horizontal}
 
 # Session options.
 startline; if ($script:unlocked -eq $true) {Write-Host "🔓 " -n} else {Write-Host "🔒 " -n}
 if ($script:unlocked -eq $true) {Write-Host -f red "[L]ock Session " -n} else {Write-Host -f darkgray "[L]ock Session " -n}
 Write-Host -f white "/ " -n;
-if ($script:unlocked -eq $true) {Write-Host -f darkgray "[U]nlock Session".padright(23) -n} else {Write-Host -f green "[U]nlock Session".padright(23) -n}
+if ($script:unlocked -eq $true) {Write-Host -f darkgray "[U]nlock session".padright(23) -n} else {Write-Host -f green "[U]nlock session".padright(23) -n}
 if (-not (Test-Path $script:keyfile -ErrorAction SilentlyContinue)) {Write-Host -f black -b yellow "❓ [H]elp <-- " -n; Write-Host "".padright(4) -n}
 else {Write-Host -f yellow "❓ [H]elp".padright(17) -n}
 Write-Host -f gray "⏏️ [ESC] " -n;; linecap
@@ -1082,7 +1083,7 @@ if ($script:disablelogging) {return}
 if ($message) {$logmessage = ($message -replace '🔐 Password:.*', '🔐 Password: [REDACTED]' -replace '🔗 URL: .*', '🔗 URL:      [REDACTED]' -replace '🆔 UserName:.*', '🆔 UserName: [REDACTED]') -split '(?m)^[-]{10,}' | Select-Object -First 1}
 
 # Map keys to descriptions.
-$map = @{'A' = 'Add an entry'; 'R' = 'Retrieve an entry'; 'X' = 'Remove an entry'; 'B' = 'Browse entries'; 'E' = 'View expired entries'; 'S' = 'Search entries'; 'L' = 'Lock'; 'U' = 'Unlock'; 'T' = 'Reset timer'; 'O' = 'Restore Default Key & Database'; 'Z' = 'Toggle Clipboard'; 'M' = 'Toggle management view'; 'K' = 'Select a key'; 'C' = 'Create a key'; 'D' = 'Select a database'; 'P' = 'Create a database'; 'V' = 'Verify a PWDB'; 'I' = 'Import a CSV'; 'OEMMINUS' = 'Export to CSV'; 'SUBTRACT' = 'Export to CSV'; 'OEMPERIOD' = 'Backup key and database'; 'OEMCOMMA' = 'Restore a key and database'; 'Q' = 'Quit'; 'H' = 'Help'; 'F1' = 'Help'; 'F4' = 'Toggle logging'; 'BACKSPACE' = 'Clear message center'}
+$map = @{'A' = 'Add an entry'; 'R' = 'Retrieve an entry'; 'X' = 'Remove an entry'; 'B' = 'Browse entries'; 'E' = 'View expired entries'; 'S' = 'Search entries'; 'L' = 'Lock'; 'U' = 'Unlock'; 'T' = 'Reset timer'; 'O' = 'Restore Default Key & Database'; 'Z' = 'Toggle Clipboard'; 'M' = 'Toggle management view'; 'K' = 'Select a key'; 'C' = 'Create a key'; 'D' = 'Select a database'; 'P' = 'Create a database'; 'V' = 'Verify a PWDB'; 'I' = 'Import a CSV'; 'OEMMINUS' = 'Export to CSV'; 'SUBTRACT' = 'Export to CSV'; 'OEMPERIOD' = 'Backup key and database'; 'OEMCOMMA' = 'Restore a key and database'; 'Q' = 'Quit'; 'H' = 'Help'; 'F1' = 'Help'; 'F4' = 'Toggle logging'; 'BACKSPACE' = 'Clear message center'; 'D1' = 'Find IPs'; 'D2' = 'Find invalid URLs'; 'D3' = 'Find valid URLs'; 'F9' = 'Display configuration information'; 'F10' = 'Development testing function'}
 
 # Create directory, if it doesn't exist.
 $script:logdir = Join-Path $PSScriptRoot 'logs'
@@ -1373,7 +1374,7 @@ if ($proveit) {$script:disablelogging = $true; if ($script:keyfile -match '\\([^
 
 'F9' {# Configuration Details
 $fixedkeydir = $keydir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $fixeddatabasedir = $databasedir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $configfileonly = $script:configpath -replace '.+\\', ''; $keyfileonly = $defaultkey -replace '.+\\', ''; $databasefileonly = $defaultdatabase -replace '.+\\', ''; $dictionaryfileonly = $dictionaryfile -replace '.+\\', ''; $timeoutminutes = [math]::Floor($timeoutseconds / 60)
-$script:message = "Configuration Details:`n`nConfiguration File Path: $configfileonly`nDefault Key:             $keyfileonly`nDefault Database:        $databasefileonly`nDictionary File:         $dictionaryfileonly`n`nSession Inactivity Timer: $timeoutseconds seconds / $timeoutminutes minutes`nScript Inactivity Timer:  $script:timetobootlimit minutes`nClipboard Timer:          $delayseconds seconds`nEntry Expiration Warning: $expirywarning days`nLog Retention:            $logretention days`nBackup Frequency:         $script:backupfrequency days`nArchives Limit:           $script:archiveslimit ZIP files`n`nDirectories:`n$fixedkeydir`n$fixeddatabasedir"; nowarning; rendermenu}
+$script:message = "Configuration Details:`n`nVersion:`t`t   $script:version`nConfiguration File Path: $configfileonly`nDefault Key:             $keyfileonly`nDefault Database:        $databasefileonly`nDictionary File:         $dictionaryfileonly`n`nSession Inactivity Timer: $timeoutseconds seconds / $timeoutminutes minutes`nScript Inactivity Timer:  $script:timetobootlimit minutes`nClipboard Timer:          $delayseconds seconds`nEntry Expiration Warning: $expirywarning days`nLog Retention:            $logretention days`nBackup Frequency:         $script:backupfrequency days`nArchives Limit:           $script:archiveslimit ZIP files`n`nDirectories:`n$fixedkeydir`n$fixeddatabasedir"; nowarning; rendermenu}
 
 'F10' {# Test function while development.
 "";""; sometestfunction; Read-Host; rendermenu}
