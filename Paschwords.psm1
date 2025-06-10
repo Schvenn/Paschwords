@@ -501,7 +501,7 @@ $key = decryptkey $script:keyfile
 if (-not $script:key) {$script:warning = "Key decryption failed. Aborting import."; nomessage; return}
 
 # Ensure the database is initialized. This is needed for new, empty databases.
-$script:jsondatabase = @()
+if (-not $script:jsondatabase) {$script:jsondatabase = @()}
 
 # Import CSV file.
 $imported = Import-Csv $csvpath; $requiredFields = @('Title', 'Username', 'Password', 'URL'); $optionalFields = @('Tags','Notes','Created','Expires')
