@@ -470,6 +470,30 @@ $aes = [Security.Cryptography.Aes]::Create(); $aes.Key = $protectKey; $aes.Gener
 # Store salt + IV + ciphertext
 $output = [byte[]]($salt + $iv + $encryptedKey); [IO.File]::WriteAllBytes("$keyfile", $output); $script:message = "Encrypted AES key created."; $script:keyfile = $keyfile; $script:keyexists = $true; $script:disablelogging = $false; nowarning}
 
+function validatedatabase {# Validate an database.
+Write-Host -f cyan "`n`n✅ Provide full path of PWDB file to validate: " -n; $filepath = Read-Host
+if ($filepath.Length -lt 1) {$script:warning = "Aborted."; nomessage; rendermenu}
+elseif (-not (Test-Path $filepath)) {$script:warning = "File not found: $filepath"; nomessage; rendermenu; return}
+
+$script:database = $filepath
+Write-Host -f cyan "`n🔑 Provide full path to the KEY file: " -n; $keypath = Read-Host
+if (-not (Test-Path $keypath)) {$script:warning = "Key file not found: $keypath"; nomessage; rendermenu; return}
+
+try {decryptkey $keypath
+if (-not $script:key) {$script:warning = "Key decryption failed."; nomessage; rendermenu; return}
+
+$script:keyfile = $keypath; $script:jsondatabase = $null; $script:jsondatabase = @(); loadjson
+if (-not $script:jsondatabase) {$script:warning = "Decryption produced no data."; nomessage; rendermenu; return}
+elseif (-not ($script:jsondatabase -is [System.Collections.IEnumerable])) {$script:warning = "Decrypted data is not an array."; nomessage; rendermenu; return}
+
+$badEntries = @(); $i = 0
+foreach ($entry in $script:jsondatabase) {$i++
+if (-not ($entry.PSObject.Properties.Name -contains 'Title' -and $entry.PSObject.Properties.Name -contains 'Password' -and $entry.PSObject.Properties.Name -contains 'URL')) {$badEntries += [PSCustomObject]@{Index=$i; Content=$entry; Reason="Missing required fields."}}}
+
+if ($badEntries.Count -gt 0) {Write-Host -f red "`nSome entries are malformed:`n"; $badEntries | Format-Table -AutoSize; Write-Host -f yellow "`n↩️ Return " -n; Read-Host; rendermenu}
+else {$script:message = "✔ All entries are valid."; nowarning; rendermenu}}
+catch {$script:warning = "❌ Verification failed:`n$($_.Exception.Message)"; nomessage; rendermenu}}
+
 function importcsv ($csvpath) {# Import a CSV file into the database.
 
 # Decrypt the key first.
@@ -1130,20 +1154,7 @@ savetodisk; $script:message = "📄 New database $getdatabase created."; nowarni
 
 'V' {# Verify a PWDB file.
 managementisdisabled
-Write-Host -f cyan "`n`n✅ Provide full path of PWDB file to validate: " -n; $filepath = Read-Host
-if ($filepath.length -lt 1) {$script:warning = "Aborted."; nomessage; rendermenu}
-elseif (-not (Test-Path $filepath)) {$script:warning = "File not found: $filepath"; nomessage; rendermenu}
-else {$lineNumber = 0; $invalidLines = @(); $fixedLines = @(); Get-Content $filepath | ForEach-Object {$lineNumber++; $line = $_.Trim()
-if ($line -eq '') {return}
-try {$null = $line | ConvertFrom-Json -ErrorAction Stop}
-catch {$fixedLine = $line -replace '"Notes"\s*:\s*"[^"]*"', '"Notes":"[Invalid JSON removed]"'
-try {$null = $fixedLine | ConvertFrom-Json -ErrorAction Stop; $fixedLines += [PSCustomObject]@{LineNumber = $lineNumber; OriginalContent = $line; FixedContent = $fixedLine}}
-catch {$invalidLines += [PSCustomObject]@{LineNumber = $lineNumber; Content = $line; Reason = "Invalid JSON even after 'Notes' fix: $($_.Exception.Message)"}}}}
-if ($fixedLines.Count -gt 0) {Write-Host -f yellow "`nLines fixed by 'Notes' replacement:"; $fixedLines | Format-Table -AutoSize}
-else {Write-Host -f green "`nNo lines needed fixing."}
-if ($invalidLines.Count -gt 0) {Write-Host -f red"`nLines still invalid after fix attempt:"; $invalidLines | Format-Table -AutoSize}
-else {Write-Host -f green "`nAll JSON lines are valid or fixable."}
-Write-Host -f yellow "`n↩️ Return " -n; Read-Host; rendermenu}}
+validatedatabase}
 
 'I' {# Import a CSV password database.
 managementisdisabled
