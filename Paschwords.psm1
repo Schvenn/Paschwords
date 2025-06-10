@@ -1054,8 +1054,8 @@ horizontal
 startline; Write-Host -f cyan " I. " -n; Write-Host -f yellow "📥 [I]mport a CSV plaintext password database.".padright(66) -n; linecap
 startline; Write-Host -f cyan " -  " -n; Write-Host -f white "📤 Export the current database to CSV. " -n; Write-Host -f red "Encryption remains intact. " -n; linecap
 horizontal
-startline; Write-Host -f cyan " <  " -n; Write-Host -f darkgreen "📦←︎ Backup currently loaded database and key.".padright(67) -n; linecap
-startline; Write-Host -f cyan " >  " -n; Write-Host -f darkcyan "📦→︎ Restore a backup.".padright(67) -n; linecap
+startline; Write-Host -f cyan " <  " -n; Write-Host -f white "📦←︎ Backup currently loaded database and key.".padright(67) -n; linecap
+startline; Write-Host -f cyan " >  " -n; Write-Host -f yellow "📦→︎ Restore a backup.".padright(67) -n; linecap
 horizontal}
 
 # Session options.
