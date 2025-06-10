@@ -1,4 +1,4 @@
-@{ModuleVersion = '3.5'
+@{ModuleVersion = '3.8'
 RootModule = 'Paschwords.psm1'
 FunctionsToExport = @('paschwords')
 PrivateData = @{defaultkey="paschwords.key"
