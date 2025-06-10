@@ -41,7 +41,7 @@ You can then add or import entries as required.
 <td valign=top width=50%><img src="https://raw.githubusercontent.com/Schvenn/Secure/refs/heads/main/screenshots/Main%20Menu.png"></td>
 </table>
 
-    @{ModuleVersion = '3.5'
+    @{ModuleVersion = '3.8'
     RootModule = 'Paschwords.psm1'
     FunctionsToExport = @('paschwords')
     PrivateData = @{defaultkey="paschwords.key"
