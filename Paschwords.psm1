@@ -168,17 +168,35 @@ if ($secure -ne $null -and $secure.length -gt 0) {wipe $secure}
 corruptdatabase; scramble $password; scramble $passwordplain
 if ($script:quit -eq $true) {scramble $script:message; scramble $script:warning}}
 
-function showentries ($entries, $pagesize = 30, [switch]$expired, [switch]$search, $keywords) {# Browse entire database.
-$sortField = $null; $descending = $false
+function showentries ($entries, $pagesize = 30, [switch]$expired, [switch]$search, $keywords, [switch]$ips, [switch]$invalidurls, [switch]$validurls) {# Browse entire database.
+$sortField = $null; $descending = $false; $ippattern = "(?i)(\d{1,3}\.){3}\d{1,3}"; $urlpattern = "(?i)(\w+?:\/\/|www\.|^[A-Z\d-]{3,}\.[A-Z\d-]{2,})"
 
-# Apply expired filter (if switch is set)
+# Expired filter.
 if ($expired) {$cutoffDate = (Get-Date).AddDays(-$script:expirywarning)
 $entries = $entries | Where-Object {[datetime]$_.Timestamp -lt $cutoffDate}}
 
-# Apply search filter (if switch is set)
+# Search filter.
 if ($search) {$pattern = "(?i)(" + ($keywords -replace "\s*,\s*", "|") + ")"; $filtered = @()
 foreach ($entry in $entries) {$joined = ($entry.PSObject.Properties | ForEach-Object {$_.Value}) -join "`n"
 if ($joined -match $pattern) {$filtered += $entry}}
+$entries = $filtered}
+
+# Find IP filter.
+if ($ips) {$filtered = @()
+foreach ($entry in $entries) {$url = $entry.URL
+if ($url -match $ippattern) {$filtered += $entry}}
+$entries = $filtered}
+
+# Invalid URL filter.
+if ($invalidurls) {$filtered = @()
+foreach ($entry in $entries) {$url = $entry.URL
+if ($url -notmatch $ippattern -and $url -notmatch $urlpattern) {$filtered += $entry}}
+$entries = $filtered}
+
+# Valid URL filter.
+if ($validurls) {$filtered = @()
+foreach ($entry in $entries) {$url = $entry.URL
+if ($url -match $urlpattern) {$filtered += $entry}}
 $entries = $filtered}
 
 # Bail out if no entries
@@ -214,6 +232,7 @@ Write-Host -f Yellow "| " -n
 Write-Host -f Green "$arrow $sortField".PadRight(10) -n
 Write-Host -f Yellow " | " -n
 Write-Host -f Cyan "↩️[ESC] "
+if ($validurls) {Write-Host -f Green "`n[X]port Valid URLs" -n}
 
 # User input for navigation and sorting
 $key = [Console]::ReadKey($true)
@@ -242,6 +261,8 @@ $page = 0}
 $page = 0}
 'Q' {nowarning; nomessage; rendermenu; return}
 'Escape' {nowarning; nomessage; rendermenu; return}
+'X' {if ($validurls){$outpath = Join-Path $script:databasedir 'validurls.txt';
+$entries.URL | Sort-Object -Unique | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f green ": " -n; Write-Host -f white "Exported $($entries.Count) valid URLs to: $outpath"; Write-Host "↩️[RETURN] " -n; Read-Host; return}}
 default {}}}}
 
 function retrieveentry ($database = $script:jsondatabase, $keyfile = $script:keyfile, $searchterm, $noclip) {
@@ -619,7 +640,7 @@ Copy-Item $script:database -Destination $tempDir; Copy-Item $script:keyfile -Des
 
 function scheduledbackup {# Run backup according to PSD1 settings.
 $baseName = [System.IO.Path]::GetFileNameWithoutExtension($script:database)
-$backups = Get-ChildItem -Path $script:databasedir -File "*.zip" -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "$baseName*(*@*).zip" }
+$backups = Get-ChildItem -Path $script:databasedir -File "*.zip" -ErrorAction SilentlyContinue | Where-Object {$_.Name -like "$baseName*(*@*).zip"}
 $needBackup = $true
 $newest = $backups | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
@@ -630,7 +651,8 @@ if ($needBackup) {Write-Host -f darkgray "💾 Creating new backup..."; backup}
 else {$script:message = $script:message + "`n🕒 No scheduled backup is currently required."; nowarning; rendermenu}
 
 # Enforce archive limit
-$backups = Get-ChildItem -Path $script:databasedir -File "$baseName*(*.zip)" -File -ErrorAction SilentlyContinue
+$backups = Get-ChildItem -Path $script:databasedir -File "$baseName*(*.zip)" -ErrorAction SilentlyContinue
+
 $sortedBackups = $backups | Sort-Object LastWriteTime -Descending
 if ($sortedBackups.Count -gt $script:archiveslimit) {$toDelete = $sortedBackups | Select-Object -Skip $script:archiveslimit
 foreach ($file in $toDelete) {try {Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop; $script:message = $script:message + "`n🗑️ Deleted old backup: $($file.Name)"; nowarning}
@@ -649,7 +671,7 @@ if (-not [int]::TryParse($selection, [ref]$null) -or $selection -lt 1 -or $selec
 
 $chosenFile = $backups[$selection - 1].FullName; $tempDir = Join-Path $env:TEMP ([Guid]::NewGuid().ToString())
 try {New-Item -ItemType Directory -Path $tempDir | Out-Null; Expand-Archive -Path $chosenFile -DestinationPath $tempDir -Force; $dbFile  = Get-ChildItem -Path $tempDir -Filter '*.pwdb' | Select-Object -First 1; $keyFile = Get-ChildItem -Path $tempDir -Filter '*.key'  | Select-Object -First 1
-if (-not $dbFile -or -not $keyFile) {$script:warning = "Backup is missing required files:`n" + (if (-not $dbFile) { "- Database (.pwdb)`n" } else {""}) + (if (-not $keyFile) { "- Key file (.key)`n" } else {""})
+if (-not $dbFile -or -not $keyFile) {$script:warning = "Backup is missing required files:`n" + (if (-not $dbFile) {"- Database (.pwdb)`n"} else {""}) + (if (-not $keyFile) {"- Key file (.key)`n"} else {""})
 Remove-Item $tempDir -Recurse -Force; return}
 
 $destDb  = Join-Path $script:databasedir $dbFile.Name; $destKey = Join-Path $script:keydir     $keyFile.Name
@@ -947,6 +969,10 @@ startline; Write-Host -f cyan " B. " -n; Write-Host -f white "🧐 [B]rowse all 
 $now = Get-Date; $expiredcount = ($script:jsondatabase | Where-Object {$_.Expires -and ($_."Expires" -as [datetime]) -le $now}).Count
 startline; Write-Host -f cyan " E. " -n; Write-Host -f white "⌛ [E]xpired entries view: " -n; if ($expiredcount -eq 0) {Write-Host -f green "0".padright(39) -n} else {Write-Host -f red "$expiredcount".padright(39) -n}; linecap
 startline; Write-Host -f cyan " S. " -n; Write-Host -f white "🔍 [S]earch entries for specific keywords.".padright(66) -n; linecap
+startline; Write-Host -f cyan "   1. " -n; Write-Host -f white "🖥  [1] Find IPs.".padright(65) -n; linecap
+startline; Write-Host -f cyan "   2. " -n; Write-Host -f white "👎 [2] Find Invalid URLs.".padright(64) -n; linecap
+startline; Write-Host -f cyan "   3. " -n; Write-Host -f white "🌐 [3] Find Valid URLs.".padright(64) -n; linecap
+
 horizontal
 startline; Write-Host -f cyan " M. " -n; Write-Host -f white "🛠️ [M]anagement controls: " -n; Write-Host -f $managementcolour $toggle.padright(40) -n; linecap
 horizontal
@@ -1119,6 +1145,18 @@ if (-not $matchedEntries.Count) {$script:warning = "No matches found for provide
 if (-not $keywords -or $keywords.Trim().Length -eq 0) {$matchedEntries = $null; $script:warning = "No search terms provided."; nomessage; rendermenu}
 
 else {showentries $matchedEntries -search -keywords $keywords; nomessage; nowarning}}
+
+'D1' {# Search for IP matches.
+if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No database loaded."; nomessage; rendermenu}
+else {showentries $script:jsondatabase -ips; nomessage; nowarning}}
+
+'D2' {# Search for invalid URLs.
+if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No database loaded."; nomessage; rendermenu}
+else {showentries $script:jsondatabase -invalidurls; nomessage; nowarning}}
+
+'D3' {# Search for invalid URLs.
+if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No database loaded."; nomessage; rendermenu}
+else {showentries $script:jsondatabase -validurls; nomessage; nowarning}}
 
 'M' {# Toggle Management mode.
 if ($script:management -eq $true) {$script:management = $false}
