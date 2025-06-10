@@ -506,6 +506,10 @@ if (-not $script:jsondatabase) {$script:jsondatabase = @()}
 # Import CSV file.
 $imported = Import-Csv $csvpath; $requiredFields = @('Title', 'Username', 'Password', 'URL'); $optionalFields = @('Tags','Notes','Created','Expires')
 
+Write-Host -f yellow "`nAre the passwords being imported currently stored in plaintext format? (Y/N) " -n; $aretheyplain = Read-Host
+if ($aretheyplain -match "[Nn]") {Write-Host -f yellow "Are the passwords for the entries that are being imported already encrypted with the currently loaded key? (Y/N) " -n; $alreadyencrypted = Read-Host
+if ($alreadyencrypted -match "[Nn]") {Write-Host -f red "Imported passwords must either be plaintext or encrypted with the same key already loaded into memory." -n; Read-Host; $script:warning = "Aborted due to password incompatability."; nomessage; rendermenu; return}}
+
 # Set expiry expectations.
 Write-Host -f yellow "`n⏳ How many days before these entries should expire? (Default = 365): " -n; $expireInput = Read-Host; $expireDays = 365
 if ([int]::TryParse($expireInput, [ref]$null)) {$expireDays = [int]$expireInput
@@ -579,8 +583,9 @@ Write-Host -f Red "`nOverwritten."; $overwritten++}
 default {Write-Host -f Green "`nKeeping both."}}}
 
 # Encrypt password using encryptpassword function; allow empty password
-if ([string]::IsNullOrWhiteSpace($plainpassword)) {Write-Host -f Yellow "`nEntry for 🆔 '$username' at 🔗 '$url' has no password. Adding with 🚫 empty password."; $plainpassword = ""}
-$encryptedPassword = encryptpassword $plainpassword
+if ($alreadyencrypted -match "[Yy]") {$encryptedPassword = $plainpassword}
+else {if ([string]::IsNullOrWhiteSpace($plainpassword)) {Write-Host -f Yellow "`nEntry for 🆔 '$username' at 🔗 '$url' has no password. Adding with 🚫 empty password."; $plainpassword = ""}
+$encryptedPassword = encryptpassword $plainpassword}
 
 # Create new entry and add to in-memory database and then save to disk.
 $newEntry = [PSCustomObject]@{Title = $title; Username = $username; Password = $encryptedPassword; URL = $url; Tags = $tags; Notes = $notes; Created = (Get-Date).ToString("yyyy-MM-dd"); Expires = $expires}
@@ -597,6 +602,12 @@ $tagsAdded = ($tagAddCounts.GetEnumerator() | Where-Object {$_.Value -gt 0})
 if ($tagsAdded.Count -gt 0) {Write-Host -f Yellow "Tag types added:" -n; Write-Host -f White " $($tagsAdded.Count)"
 Write-Host -f Yellow "Tags added:" -n; Write-Host -f White " $($tagsAdded.Name -join ', ')"}
 Write-Host -f Cyan "`n↩️Return" -n; Read-Host}
+
+function sometestfunction {# Various testing functions via F10
+
+# Create a bogus entry to test the validate function.
+# $entry = [PSCustomObject]@{Title = "Batman"}; $script:jsondatabase += $entry; savetodisk
+}
 
 #---------------------------------------------END SECURE FILE MANAGEMENT FUNCTIONS-----------------
 
@@ -934,7 +945,7 @@ startline; Write-Host -f cyan " X. " -n; Write-Host -f red "❌ Remove an entry.
 horizontal
 startline; Write-Host -f cyan " B. " -n; Write-Host -f white "🧐 [B]rowse all entries: " -n; Write-Host -f cyan "$(($script:jsondatabase).Count)".padright(41) -n; linecap
 $now = Get-Date; $expiredcount = ($script:jsondatabase | Where-Object {$_.Expires -and ($_."Expires" -as [datetime]) -le $now}).Count
-startline; Write-Host -f cyan " E. " -n; Write-Host -f white "⌛ [E]xpired entries view: " -n; if ($expiredcount -eq 0) {Write-Host -f green "0".padright(39) -n} else {Write-Host -f red "$expiredcount" -n}; linecap
+startline; Write-Host -f cyan " E. " -n; Write-Host -f white "⌛ [E]xpired entries view: " -n; if ($expiredcount -eq 0) {Write-Host -f green "0".padright(39) -n} else {Write-Host -f red "$expiredcount".padright(39) -n}; linecap
 startline; Write-Host -f cyan " S. " -n; Write-Host -f white "🔍 [S]earch entries for specific keywords.".padright(66) -n; linecap
 horizontal
 startline; Write-Host -f cyan " M. " -n; Write-Host -f white "🛠️ [M]anagement controls: " -n; Write-Host -f $managementcolour $toggle.padright(40) -n; linecap
