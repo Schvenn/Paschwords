@@ -388,6 +388,12 @@ if ($answer -notmatch '^[Yy]') {Write-Host -f yellow "`nPlease update the entry:
 if ([string]::IsNullOrEmpty($titleNew)) {$titleNew = $existing.Title} else {$title = $titleNew}
 Write-Host -f yellow "🆔 Username ($($existing.Username)): " -n; $usernameNew = Read-Host
 if ([string]::IsNullOrEmpty($usernameNew)) {$usernameNew = $existing.Username} else {$username = $usernameNew}
+""; Write-Host -f yellow ("-" * 72)
+indent "⚠️ WARNING! ⚠️" red 29
+$nohistory = "By updating the entry this way, you will not be able to save a password history. If you wish to keep a history of old passwords, albeit in plaintext, abandon adding this as a new entry and choose the Update option, instead. Simply hit enter at the next prompt in order to abandon adding this entry.️"
+$nohistory = wordwrap $nohistory
+indent $nohistory white 2
+Write-Host -f yellow ("-" * 72); ""
 Write-Host -f green "🔐 Do you want to keep the original password or use the new one you just entered? (new/old) " -n; $keep = Read-Host
 if ($keep -match "^(?i)old$") {$secure = $existing.Password}
 elseif ($keep -match "^(?i)new$") {}
@@ -455,7 +461,8 @@ $username  = Read-Host "🆔 Username ($($entry.Username))"
 
 # Password choice
 Write-Host -f yellow "🔐 Do you want to update the password? (Y/N) " -n; $updatepass = Read-Host
-if ($updatepass -match '^[Yy]') {Write-Host -f yellow "Use Paschword generator? (Y/N) " -n; $gen = Read-Host
+if ($updatepass -match '^[Yy]') {Write-Host -f yellow "🔐 Do you want to want to keep a history of the old password in Notes? (Y/N) " -n; $passwordhistory = Read-Host
+Write-Host -f yellow "Use Paschword generator? (Y/N) " -n; $gen = Read-Host
 if ($gen -match '^[Yy]') {$passplain = paschwordgenerator; Write-Host -f yellow "Accept password? (Y/N) " -n; $accept = Read-Host
 while ($accept -match '^[Nn]') {$passplain = paschwordgenerator -regenerate; Write-Host -f yellow "Accept password? (Y/N) " -n; $accept = Read-Host}}
 else {Write-Host -f yellow "🔐 Password: " -n; $pass = Read-Host -AsSecureString
@@ -483,7 +490,10 @@ $entry.URL = if ($url) {$url} else {$entry.URL}
 $entry.Tags = if ($tags) {($tags -split ',') | ForEach-Object {$_.Trim()} | Where-Object {$_} | Join-String -Separator ', '} else {$entry.Tags}
 $entry.Notes = if ($notesIn) {$notesIn} else {$entry.Notes}
 $entry.Expires = $expires
-$entry.Created = Get-Date -Format "yyyy-MM-dd"
+$updatedtoday = Get-Date -Format "yyyy-MM-dd"
+if($passwordhistory -match "[Yy]") {if (-not [string]::IsNullOrWhiteSpace($entry.Notes)) {$entry.Notes = $entry.Notes.TrimEnd(); $entry.Notes += "`n------------------------------------`n"}
+$entry.Notes = $entry.Notes += "[OLD PASSWORD] $passwordplain (valid from $($entry.Created) to $updatedtoday)"}
+$entry.Created = $updatedtoday
 
 # Save and confirm
 $script:jsondatabase = $database
@@ -692,9 +702,10 @@ Write-Host -f Yellow "Tags added:" -n; Write-Host -f White " $($tagsAdded.Name -
 Write-Host -f Cyan "`n↩️Return" -n; Read-Host}
 
 function sometestfunction {# Various testing functions via F10
-
 # Create a bogus entry to test the validate function.
 # $entry = [PSCustomObject]@{Title = "Batman"}; $script:jsondatabase += $entry; savetodisk
+
+# Note to self: the following keys are not yet mapped via the main menu: f g j n w y 4-9 0
 }
 
 #---------------------------------------------END SECURE FILE MANAGEMENT FUNCTIONS-----------------
