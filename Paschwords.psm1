@@ -203,7 +203,7 @@ $entries = $filtered}
 # Bail out if no entries
 $total = $entries.Count
 if ($total -eq 0) {$script:warning = "No entries to view."; nomessage; rendermenu; return}
-if ($entries -isnot [System.Collections.IEnumerable] -or $entries -is [string]) {$entries = @($entries)}
+if ($entries -isnot [System.Collections.IEnumerable] -or $entries -is [string]) {$entries = @($entries); $exportset = @($entries)}
 
 $page = 0
 while ($true) {cls; if ($sortField) {$entries = if ($descending) {$entries | Sort-Object $sortField -Descending} else {$entries | Sort-Object $sortField}}
@@ -232,8 +232,9 @@ Write-Host -f Green " Sort by: 📜(T)itle 🆔(U)ser 🔗(W)eb URL 🏷 Ta[G]s"
 Write-Host -f Yellow "| " -n
 Write-Host -f Green "$arrow $sortField".PadRight(10) -n
 Write-Host -f Yellow " | " -n
-Write-Host -f Cyan "↩️[ESC] "
-if ($validurls) {Write-Host -f Green "`n[X]port Valid URLs" -n}
+Write-Host -f Cyan "↩️[ESC] " -n
+if ($validurls -and -not $standarduser) {Write-Host -f Green "`n`n[X]port valid URLs " -n}
+if (-not $validurls -and -not $standarduser) {Write-Host -f Green "`n`n[X]port current search results " -n}
 
 # User input for navigation and sorting
 $key = [Console]::ReadKey($true)
@@ -262,8 +263,8 @@ $page = 0}
 $page = 0}
 'Q' {nowarning; nomessage; rendermenu; return}
 'Escape' {nowarning; nomessage; rendermenu; return}
-'X' {if ($validurls){$outpath = Join-Path $script:databasedir 'validurls.txt';
-$entries.URL | Sort-Object -Unique | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f green ": " -n; Write-Host -f white "Exported $($entries.Count) valid URLs to: $outpath"; Write-Host "↩️[RETURN] " -n; Read-Host; return}}
+'X' {if (-not $standarduser) {if ($validurls) {$outpath = Join-Path $script:databasedir 'validurls.txt'; $entries.URL | Sort-Object -Unique | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f white "Exported $($entries.Count) valid URLs to: $outpath"; Write-Host -f cyan "`n↩️[RETURN] " -n; Read-Host; return}
+elseif (-not $validurls) {$outpath = Join-Path $script:databasedir 'searchresults.txt'; @($entries) | Select-Object Title, Username, URL, Tags, Created, Expires | ConvertTo-Csv -NoTypeInformation | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f white "Exported $($entries.Count) entries to: $outpath"; Write-Host -f cyan "`n↩️[RETURN] " -n; Read-Host; rendermenu; return}}}
 default {}}}}
 
 function retrieveentry ($database = $script:jsondatabase, $keyfile = $script:keyfile, $searchterm, $noclip) {
@@ -1280,7 +1281,6 @@ if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warn
 else {showentries $script:jsondatabase -invalidurls; nomessage; nowarning}}
 
 'D3' {# Search for valid URLs.
-limitedaccess; if ($standarduser) {break}
 if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No database loaded."; nomessage; rendermenu}
 else {showentries $script:jsondatabase -validurls; nomessage; nowarning}}
 
@@ -1465,11 +1465,13 @@ Export-ModuleMember -Function paschwords
 
 Most features should be self-explanatory, but here are some useful pieces of information to know:
 
+Standard users have permissions to view, search and retrieve entries, toggle clipboard, lock and unlock the session and reset the timer. All other features are only granted to privileged users. If a standard user wants to load a different database and key, they will need to do so by specifying it at the command line.
+
 It is best practice to save key files somewhere distant from the databases. Saving them in different directories on the same hard drive does not count as proper security management, but if this is being used as a personal password manager, then it isn't typically an issue.
 
 The import function is extremely powerful, accepting non-standard fields and importing them as tags, notes, or both. This should make it capable of importing password databases from a wide variety of other password managers, commercial and otherwise. Press 'I' in management mode for more details.
 
-You can use 'F4' to disable logging for the currently loaded key, but only while it's loaded. As soon as any key is loaded, including the same one, logging resumes.
+You can use 'F4' to disable logging for the currently loaded key, but only while it's loaded. As soon as another key is loaded, including the same one, logging resumes.
 
 You can use 'F9' to see the current script configuration details and 'F10' to change them.
 
