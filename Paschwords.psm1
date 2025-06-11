@@ -1000,6 +1000,49 @@ return $script:emoji}
 function managementisdisabled {# Restrict access to specific features.
 emoji; if (-not $script:management) {$script:warning = "'$script:emoji' is disabled outside of management mode."; nomessage; rendermenu; break}}
 
+function limitedaccess {# Restrict access to management keys only.
+if ($script:standarduser) {$script:warning = "Access to this feature is restricted."; nomessage; rendermenu; break}}
+
+function modifyconfiguration {# Modify the PSD1 configuration.
+# Load current settings
+$manifest = Import-PowerShellDataFile -Path $configpath
+$config = $manifest.PrivateData
+
+# Define editable keys with constraints
+$editable = @{defaultkey = @{desc='Key filename'; validate={param($v) $v -match '\S'}}
+defaultdatabase = @{desc='Database filename'; validate={param($v) $v -match '\S'}}
+keydir = @{desc='Key directory path'; validate={param($v) $v -match '\S'}}
+databasedir = @{desc='Database directory path'; validate={param($v) $v -match '\S'}}
+timeoutseconds = @{desc='Timeout (max 5940 seconds)'; validate={param($v) try {($v -as [int]) -in 1..5940} catch {$false}}}
+timetobootlimit = @{desc='Boot time limit (max 120 minutes)'; validate={param($v) try {($v -as [int]) -in 1..120} catch {$false}}}
+delayseconds = @{desc='Clipboard delay (in seconds)'; validate={param($v) try {[int]$v -ge 0} catch {$false}}}
+expirywarning = @{desc='Password expiry (1–365 days)'; validate={param($v) try {($v -as [int]) -in 1..365} catch {$false}}}
+logretention = @{desc='Log retention (min 30 days)'; validate={param($v) try {[int]$v -ge 30} catch {$false}}}
+dictionaryfile = @{desc='Dictionary filename'; validate={param($v) $v -match '\S'}}
+backupfrequency = @{desc='Backup frequency (in days)'; validate={param($v) try {[int]$v -ge 1} catch {$false}}}
+archiveslimit = @{desc='Archives limit (files to retain)'; validate={param($v) try {[int]$v -ge 1} catch {$false}}}}
+
+Write-Host -f yellow "`n`nCurrent Configuration:`n"; $i = 0
+Write-Host -f cyan "There are currently $($editable.count) configurable items in v$script:version.`n"
+foreach ($key in $editable.Keys) {$current = $config[$key]; $i++
+Write-Host -f white "$i. $($editable[$key].desc) [$key = '$current']: " -n; $input = Read-Host
+if ($input -ne '') {if (-not (& $editable[$key].validate $input)) {Write-Host -f red "Invalid value for $key. Keeping existing value."}
+else {$config[$key] = "$input"; Write-Host -f green "$key updated to '$input'"}}}
+
+# Rebuild psd1 content
+$lines = @()
+$lines += "# Core module details`n@{"
+foreach ($k in $manifest.Keys) {if ($k -ne 'PrivateData') {$v = $manifest[$k]
+if ($v -is [string]) {$lines += "$k = '$v'"}
+elseif ($v -is [array]) {$lines += "$k = @('" + ($v -join "', '") + "')"}
+else {$lines += "$k = $v"}}
+else {$lines += "`n# Configuration data"; $lines += "PrivateData = @{"
+foreach ($sk in $config.Keys) {$sv = $config[$sk]; $lines += "$sk = '$sv'"}
+$lines += "}"}}; $lines += "}"
+
+# Save new file
+Set-Content -Path $configpath -Value $lines -Encoding UTF8; Write-Host -f green "`nConfiguration updated successfully."; initialize; return}
+
 function rendermenu {# Title and countdown timer.
 $toggle = if ($script:management) {"Hide"} else {"Show"}; $managementcolour = if ($script:management) {"darkgray"} else {"green"}
 
@@ -1194,6 +1237,7 @@ elseif ($searchterm) {retrieveentry $script:jsondatabase $script:keyfile $search
 rendermenu}
 
 'X' {# Remove an entry.
+limitedaccess; if ($standarduser) {break}
 Write-Host -f green "`n`n❌ Enter Title, Username, URL, Tag or Note to identify entry: " -n; $searchterm = Read-Host; removeentry $searchterm; rendermenu}
 
 'B' {# Browse all entries from memory.
@@ -1235,11 +1279,13 @@ else {showentries $script:jsondatabase -ips; nomessage; nowarning}}
 if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No database loaded."; nomessage; rendermenu}
 else {showentries $script:jsondatabase -invalidurls; nomessage; nowarning}}
 
-'D3' {# Search for invalid URLs.
+'D3' {# Search for valid URLs.
+limitedaccess; if ($standarduser) {break}
 if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No database loaded."; nomessage; rendermenu}
 else {showentries $script:jsondatabase -validurls; nomessage; nowarning}}
 
 'M' {# Toggle Management mode.
+limitedaccess; if ($standarduser) {break}
 if ($script:management -eq $true) {$script:management = $false}
 else {$script:management = $true}
 nowarning; nomessage; rendermenu}
@@ -1377,18 +1423,27 @@ nomessage; nowarning; rendermenu}
 nomessage; nowarning; rendermenu}
 
 'F4' {# Turn off Logging.
+limitedaccess; if ($standarduser) {break}
 if ($script:disablelogging) {$script:message = "Logging is already turned off for the current key activity."; nowarning; rendermenu}
 
 else {$proveit = $null; ""; $proveit = decryptkey $script:keyfile
 if (-not $proveit) {$proveit = $null; $script:warning = "Password failed or aborted. Logging is still active."; nomessage; rendermenu}
 if ($proveit) {$script:disablelogging = $true; if ($script:keyfile -match '\\([^\\]+)$') {$shortkey = $matches[1]} ; $script:warning = "Logging turned off for $shortkey @ $(Get-Date)"; nomessage; rendermenu}}}
 
-'F9' {# Configuration Details
+'F9' {# Configuration details.
+limitedaccess
 $fixedkeydir = $keydir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $fixeddatabasedir = $databasedir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $configfileonly = $script:configpath -replace '.+\\', ''; $keyfileonly = $defaultkey -replace '.+\\', ''; $databasefileonly = $defaultdatabase -replace '.+\\', ''; $dictionaryfileonly = $dictionaryfile -replace '.+\\', ''; $timeoutminutes = [math]::Floor($timeoutseconds / 60)
 $script:message = "Configuration Details:`n`nVersion:`t`t   $script:version`nConfiguration File Path: $configfileonly`nDefault Key:             $keyfileonly`nDefault Database:        $databasefileonly`nDictionary File:         $dictionaryfileonly`n`nSession Inactivity Timer: $timeoutseconds seconds / $timeoutminutes minutes`nScript Inactivity Timer:  $script:timetobootlimit minutes`nClipboard Timer:          $delayseconds seconds`nEntry Expiration Warning: $expirywarning days`nLog Retention:            $logretention days`nBackup Frequency:         $script:backupfrequency days`nArchives Limit:           $script:archiveslimit ZIP files`n`nDirectories:`n$fixedkeydir`n$fixeddatabasedir"; nowarning; rendermenu}
 
-'F10' {# Test function while development.
-"";""; sometestfunction; Read-Host; rendermenu}
+'F10' {# Modify PSD1 configuration.
+limitedaccess; modifyconfiguration; $script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; Write-Host -f yellow "Reloading default key and database."; $script:key = decryptkey $script:keyfile
+if ($script:unlocked) {$script:message = "New configuration active. Default key and database successfully loaded and made active."; nowarning}
+rendermenu}
+
+'OEM3' {# Test function while in development.
+#if ($script:standarduser -eq $true) {$script:standarduser = $false; $script:message = "Limited access is disabled."; nowarning; rendermenu}
+#elseif ($script:standarduser -eq $false -or -not $script:standarduser) {$script:standarduser = $true; $script:message = "Limited access is enabled."; nowarning; rendermenu}
+}
 
 default {if ($choice.length -gt 0) {$script:warning = "'$choice' is an invalid choice. Try again."}}}
 
@@ -1416,12 +1471,12 @@ The import function is extremely powerful, accepting non-standard fields and imp
 
 You can use 'F4' to disable logging for the currently loaded key, but only while it's loaded. As soon as any key is loaded, including the same one, logging resumes.
 
-You can use 'F9' to see the current script configuration details.
+You can use 'F9' to see the current script configuration details and 'F10' to change them.
 
 When the clipboard empties, it is first overwritten with junk, in order to reduce memory artefacts. Clipboard managers would make this pointless, but this method can still be effective in commercial environments, provided proper application hygeine is in place.
 ## PSD1 Configuration
 
-You can configure the following items in the accomanying PSD1 file:
+You can view the current configuration with F9 and edit it with F10. These settings are all loaded from the accomanying PSD1 file:
 
 • The default database and key file names and their respective file paths make it easier to locate and switch databases, on the fly.
 
