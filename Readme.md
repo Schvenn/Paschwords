@@ -73,3 +73,5 @@ You can then add or import entries as required.
 
 
 As mentioned above, if you leave "DefaultPowerShellDirectory" in the configuration file, the module will redirect these for you.
+
+A separate script "ValidateURLs.ps1" is included to test a file containing a list of URLs for connectivity. This is designed to be used with the Valid URLs search and export function within the module, but I am keeping it separate in order to ensure the Paschword manager remains completely offline and thereby limits its security exposure.
