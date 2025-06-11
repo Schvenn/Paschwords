@@ -1,6 +1,7 @@
 param([string]$filename)
 
-if (-not (Test-Path $filename)) {Write-Host -f red "File not found: $filename"; return}
+if (-not $filename) {Write-Host -f white "`nThis tool evaluates a list of URLs to ensure they are still active. To use it, provide a text file containing a list of URLs you need to validate, one entry per line.`n"; Write-Host -f cyan "`tUsage: validateurls <filename>`n";return}
+if (-not (Test-Path $filename)) {Write-Host -f red "`nFile not found: $filename`n"; return}
 
 $urls = Get-Content $filename | Where-Object {$_.Trim() -ne ""}; $total = $urls.Count; $validated = 0; $invalid = 0; $retryList = @(); $count2xx = 0; $count401 = 0; $count403 = 0; $count429 = 0; $count500 = 0; $count503 = 0; $countOtherInvalid = 0; $validList = @(); $invalidList = @(); $startTime = Get-Date; $timings = [System.Collections.Generic.Queue[double]]::new(); $windowSize = 20
 
