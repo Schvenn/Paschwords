@@ -12,7 +12,7 @@ If no database/keyfile are specified, the defaults "paschwords.pwdb" and "paschw
 
 When a password is retrieved, it will automatically be copied to the clipboard for 30 seconds, unless the -noclip option is used at launch time.
 
-You can configure and number of options by modifying the entries in the "Paschwords.psd1" file located in the same directory as the module, including the default password database filename, default key file and the directories where these are saved, as well as several other features.
+You can configure and number of options by modifying the entries in the "Paschwords.psd1" file located in the same directory as the module, or by using F9 to view and F10 to edit these configuration items.
 
 Expiration dates only present the entries in a separate browse window for easy identification. No changes are made to the entries.
 
@@ -41,25 +41,35 @@ You can then add or import entries as required.
 <td valign=top width=50%><img src="https://raw.githubusercontent.com/Schvenn/Secure/refs/heads/main/screenshots/Main%20Menu.png"></td>
 </table>
 
-    @{ModuleVersion = '3.8'
-    RootModule = 'Paschwords.psm1'
+    # Core module details
+    @{
+    CompatiblePSEditions = @('Desktop')
+    CompanyName = 'Plath Consulting Incorporated'
+    PowerShellVersion = '5.1'
     FunctionsToExport = @('paschwords')
-    PrivateData = @{defaultkey="paschwords.key"
-    defaultdatabase="paschwords.pwdb"
-    # If you use some path under DefaultPowerShellDirectory, this will be replaced in the script with the user's actual PowerShell directory.
-    keydir="DefaultPowerShellDirectory\Modules\Paschwords\keys"
-    databasedir="DefaultPowerShellDirectory\Modules\Paschwords\databases"
-    # timeoutseconds cannot exceed 99 minutes (5940 seconds)
-    timeoutseconds="900"
-    # timetobootlimit cannot exceed 120 minutes.
-    timetobootlimit="60"
-    # Clipboard clearance delay seconds before being wiped, provided the -noclip option is not already in use.
-    delayseconds="30"
-    # This is the number of days that must pass before an entry's password is considered expired. The default and maximum is 365.
-    expirywarning="365"
-    # logretention cannot be less than 30 days.
-    logretention="30"
-    # Set the dictionary for password generation.
-    dictionaryfile="Common.dictionary"}}
+    
+    # Configuration data
+    PrivateData = @{
+    timetobootlimit = '60'
+    defaultdatabase = 'paschwords.pwdb'
+    dictionaryfile = 'common.dictionary'
+    archiveslimit = '5'
+    defaultkey = 'paschwords.key'
+    expirywarning = '365'
+    databasedir = 'DefaultPowerShellDirectory\Modules\Paschwords\databases'
+    timeoutseconds = '900'
+    delayseconds = '30'
+    backupfrequency = '7'
+    logretention = '30'
+    keydir = 'DefaultPowerShellDirectory\Modules\Paschwords\keys'
+    }
+    ModuleVersion = '3.9'
+    Description = 'Secure password manager using AES encryption and key-based protection.'
+    GUID = 'd4f71764-0e43-4632-8b35-0f0a79b36f62'
+    Copyright = '(c) Craig Plath. All rights reserved.'
+    RootModule = 'Paschwords.psm1'
+    Author = 'Schvenn'
+    }
+
 
 As mentioned above, if you leave "DefaultPowerShellDirectory" in the configuration file, the module will redirect these for you.
