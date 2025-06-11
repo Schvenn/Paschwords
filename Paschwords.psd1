@@ -20,7 +20,7 @@ backupfrequency = '7'
 logretention = '30'
 keydir = 'DefaultPowerShellDirectory\Modules\Paschwords\keys'
 }
-ModuleVersion = '3.9'
+ModuleVersion = '3.95'
 Description = 'Secure password manager using AES encryption and key-based protection.'
 GUID = 'd4f71764-0e43-4632-8b35-0f0a79b36f62'
 Copyright = '(c) Craig Plath. All rights reserved.'
