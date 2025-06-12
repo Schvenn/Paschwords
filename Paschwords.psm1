@@ -37,6 +37,19 @@ if (-not $script:keyfile -or -not (Test-Path $script:keyfile -ErrorAction Silent
 if ($script:keyfile -and -not [System.IO.Path]::IsPathRooted($script:keyfile)) {$script:keyfile = Join-Path $script:keydir $script:keyfile}
 if (-not (Test-Path $script:keyfile -ErrorAction SilentlyContinue) -and -not (Test-Path $script:defaultkey -ErrorAction SilentlyContinue)) {$script:keyexists = $false; $script:keyfile = $null; $script:database = $null}}
 
+function resizewindow {# Attempt to set window size if it's too small and the environment is not running inside Terminal.
+$minWidth = 130; $minHeight = 50; $buffer = $Host.UI.RawUI.BufferSize; $window = $Host.UI.RawUI.WindowSize
+if ($env:WT_SESSION -and ($window.Width -lt $minWidth -or $window.Height -lt $minHeight)) {Write-Host -f red "`nWarning:" -n; Write-Host -f white " You are running PowerShell inside Windows Terminal and this module is therefore unable to resize the window. Please manually resize it to at least $minWidth by $minHeight for best performance. Your current window size is $($window.Width) by $($window.Height)."}
+if ($buffer.Width -lt $minWidth) {$buffer.Width = $minWidth}
+if ($buffer.Height -lt $minHeight) {$buffer.Height = $minHeight}
+$Host.UI.RawUI.BufferSize = $buffer
+try {if ($window.Width -lt $minWidth) { $window.Width = $minWidth}
+if ($window.Height -lt $minHeight){$window.Height = $minHeight}
+$Host.UI.RawUI.WindowSize = $window}
+catch {Write-Host -f red "`nWarning:" -n; Write-Host -f white " Unable to resize window. Please manually resize to at least $minWidth x $minHeight."}
+$window = $Host.UI.RawUI.WindowSize
+if ($window.Width -lt $minWidth -or $window.Height -lt $minHeight) {Write-Host -f red "`nWarning:" -n; Write-Host -f white " This module works best when the screen size is at least $minWidth characters wide by $minHeight lines.`n Current window size is $($window.Width) x $($window.Height). Output may wrap or scroll unexpectedly.`n"}}
+
 function clearclipboard ($delayseconds = 30) {# Fill the clipboard with junk and then clear it after a delay.
 Start-Job -ScriptBlock {param($delay, $length); Start-Sleep -Seconds $delay; $junk = -join ((33..126) | Get-Random -Count $length | ForEach-Object {[char]$_}); Set-Clipboard -Value $junk; Start-Sleep -Milliseconds 500; Set-Clipboard -Value $null} -ArgumentList $delayseconds, 64 | Out-Null}
 
@@ -47,10 +60,11 @@ function nomessage {# Set global message field to null.
 $script:message = $null}
 
 function wordwrap ($field, [int]$maximumlinelength = 65) {# Modify fields sent to it with proper word wrapping.
-if ($null -eq $field -or $field.length -eq 0) {return $null}
+if ($null -eq $field -or $field.Length -eq 0) {return $null}
 $breakchars = ',.;?!\/ '; $wrapped = @()
 
-foreach ($line in $field -split "`n") {$remaining = $line.Trim()
+foreach ($line in $field -split "`n") {if ($line.Trim().Length -eq 0) {$wrapped += ''; continue}
+$remaining = $line.Trim()
 while ($remaining.Length -gt $maximumlinelength) {$segment = $remaining.Substring(0, $maximumlinelength); $breakIndex = -1
 
 foreach ($char in $breakchars.ToCharArray()) {$index = $segment.LastIndexOf($char)
@@ -58,7 +72,7 @@ if ($index -gt $breakIndex) {$breakChar = $char; $breakIndex = $index}}
 if ($breakIndex -lt 0) {$breakIndex = $maximumlinelength - 1; $breakChar = ''}
 $chunk = $segment.Substring(0, $breakIndex + 1).TrimEnd(); $wrapped += $chunk; $remaining = $remaining.Substring($breakIndex + 1).TrimStart()}
 
-if ($remaining) {$wrapped += $remaining} elseif ($line -eq '') {$wrapped += ''}}
+if ($remaining.Length -gt 0) {$wrapped += $remaining}}
 return ($wrapped -join "`n")}
 
 function indent ($field, $colour = 'white', [int]$indent = 2) {# Set a default indent for a field.
@@ -70,7 +84,7 @@ function helptext {# Detailed help.
 
 function scripthelp ($section) {# (Internal) Generate the help sections from the comments section of the script.
 ""; Write-Host -f yellow ("-" * 100); $pattern = "(?ims)^## ($section.*?)(##|\z)"; $match = [regex]::Match($scripthelp, $pattern); $lines = $match.Groups[1].Value.TrimEnd() -split "`r?`n", 2; Write-Host $lines[0] -f yellow; Write-Host -f yellow ("-" * 100)
-if ($lines.Count -gt 1) {$lines[1] | Out-String | Out-Host -Paging}; Write-Host -f yellow ("-" * 100)}
+if ($lines.Count -gt 1) {wordwrap $lines[1] 100| Out-String | Out-Host -Paging}; Write-Host -f yellow ("-" * 100)}
 
 $scripthelp = Get-Content -Raw -Path $PSCommandPath; $sections = [regex]::Matches($scripthelp, "(?im)^## (.+?)(?=\r?\n)")
 if ($sections.Count -eq 1) {cls; Write-Host "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) Help:" -f cyan; scripthelp $sections[0].Groups[1].Value; ""; return}
@@ -78,7 +92,7 @@ $selection = $null
 
 do {cls; Write-Host "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) Help Sections:`n" -f cyan; for ($i = 0; $i -lt $sections.Count; $i++) {"{0}: {1}" -f ($i + 1), $sections[$i].Groups[1].Value}
 if ($selection) {scripthelp $sections[$selection - 1].Groups[1].Value}
-$input = Read-Host "`nEnter a section number to view"
+Write-Host -f white "`nEnter a section number to view " -n; $input = Read-Host
 if ($input -match '^\d+$') {$index = [int]$input
 if ($index -ge 1 -and $index -le $sections.Count) {$selection = $index}
 else {$selection = $null}} else {""; return}}
@@ -215,12 +229,12 @@ if ($expired) {$warningDate = (Get-Date).AddDays(-$script:expirywarning).ToShort
 
 # Display the entries in a formatted table
 $chunk | Select-Object `
-@{Name='Title'; Expression = {$_.Title}}, `
-@{Name='Username'; Expression = {$_.Username}}, `
+@{Name='Title'; Expression = {if ($_.Title.Length -gt 25) {$_.Title.Substring(0,22) + '...'} else {$_.Title}}}, `
+@{Name='Username'; Expression = {if ($_.Username.Length -gt 25) {$_.Username.Substring(0,22) + '...'} else {$_.Username}}}, `
 @{Name='URL'; Expression = {if ($_.URL.Length -gt 40) {$_.URL.Substring(0,37) + '...'} else {$_.URL}}}, `
-@{Name='Tags'; Expression = {if ($_.Tags.Length -gt 35) {$_.Tags.Substring(0,32) + '...'} else {$_.Tags}}}, `
+@{Name='Tags'; Expression = {if ($_.Tags.Length -gt 15) {$_.Tags.Substring(0,12) + '...'} else {$_.Tags}}}, `
 @{Name='Created'; Expression = {Get-Date $_.Created -Format 'yyyy-MM-dd'}}, `
-@{Name='Expires'; Expression = {Get-Date $_.Expires -Format 'yyyy-MM-dd'}} | Format-Table -AutoSize
+@{Name='Expires'; Expression = {Get-Date $_.Expires -Format 'yyyy-MM-dd'}} | Format-Table | Write-Output
 
 # Sorting arrow indicator
 $arrow = if ($descending) {"▾"} else {if (-not $sortField) {""} else {"▴"}}
@@ -459,12 +473,12 @@ $passwordplain = decryptpassword $entry.Password
 Write-Host -f white "🗓️ Created:  $($entry.Created)`n⌛ Expires:  $($entry.Expires)`n📜 Title:    $($entry.Title)`n🆔 UserName: $($entry.Username)`n🔐 Password: $passwordplain`n🔗 URL:      $($entry.URL)`n🏷️ Tags:     $($entry.Tags)`n------------------------------------`n📝 Notes:`n`n$($entry.Notes)"
 
 # Prompt user for updated values
-Write-Host -f yellow "`n📝 Update entry fields. Leave blank to keep the current value."
-$title     = Read-Host "`n📜 Title ($($entry.Title))"
-$username  = Read-Host "🆔 Username ($($entry.Username))"
+Write-Host -f yellow "`n📝 Update entry fields. Leave blank to keep the current value.`n"
+Write-Host -f white "📜 Title ($($entry.Title)): " -n; $title = Read-Host
+Write-Host -f white "🆔 Username ($($entry.Username)): " -n; $username  = Read-Host
 
 # Password choice
-Write-Host -f yellow "🔐 Do you want to update the password? (Y/N) " -n; $updatepass = Read-Host
+Write-Host -f yellow "`n🔐 Do you want to update the password? (Y/N) " -n; $updatepass = Read-Host
 if ($updatepass -match '^[Yy]') {Write-Host -f yellow "🔐 Do you want to want to keep a history of the old password in Notes? (Y/N) " -n; $passwordhistory = Read-Host
 Write-Host -f yellow "Use Paschword generator? (Y/N) " -n; $gen = Read-Host
 if ($gen -match '^[Yy]') {$passplain = paschwordgenerator; Write-Host -f yellow "Accept password? (Y/N) " -n; $accept = Read-Host
@@ -474,11 +488,13 @@ try {$passplain = [System.Net.NetworkCredential]::new("", $pass).Password} catch
 try {$secure = encryptpassword $passplain $key} catch {$script:warning = "Password encryption failed."; nomessage; rendermenu; return}}
 else {$secure = $entry.Password}
 
-$url       = Read-Host "🔗 URL ($($entry.URL))"
-$expireIn  = Read-Host "⏳ Days before expiry (default: keep $($entry.Expires))"
-$tags      = Read-Host "🏷️ Tags ($($entry.Tags))"
-Write-Host -f yellow "📝 Notes (CTRL-Z + Enter to end, or leave blank): " -n
+Write-Host -f white "`n🔗 URL ($($entry.URL)): " -n; $url = Read-Host 
+Write-Host -f white  "⏳ Days before expiry (default: keep $($entry.Expires)) " -n; $expireIn = Read-Host
+Write-Host -f white "🏷️ Tags ($($entry.Tags)): " -n; $tags = Read-Host
+Write-Host -f white "📝 Notes (CTRL-Z, Enter to leave unchanged): " -n
 $notesIn = [Console]::In.ReadToEnd()
+Write-Host -f yellow  "`nAre you satisfied with everything? (Y/N/Abandon) " -n; $abandon = Read-Host
+if ($abandon -notmatch "^[Yy]") {$script:warning = "Abandoned updating entry."; nomessage; rendermenu; return}
 
 # Expiration logic
 if ([int]::TryParse($expireIn, [ref]$null)) {$expireDays = [int]$expireIn
@@ -1185,6 +1201,15 @@ for ($i = 0; $i -lt $retries; $i++) {try {$fs = [System.IO.File]::Open($script:l
 $sw.WriteLine($entry); $sw.Close(); $fs.Close(); break}
 catch {Start-Sleep -Milliseconds 100}}}
 
+function logcleanup {# Compress log files.
+
+function gziplog ($inputFile, $outputFile = "$inputFile.gz") {$inputStream = [System.IO.File]::OpenRead($inputFile); $outputStream = [System.IO.File]::Create($outputFile); $gzipStream = New-Object System.IO.Compression.GZipStream($outputStream, [System.IO.Compression.CompressionMode]::Compress); $inputStream.CopyTo($gzipStream); $gzipStream.Close(); $inputStream.Close(); $outputStream.Close()}
+
+Get-ChildItem -Path $logdir -Filter 'log - *.log' | Where-Object {$_.Name -match '^log - (\d{2})-(\d{2})-(\d{2})' -and $_.Name -notmatch '^log - \d{2}-\d{2}-\d{2}\.log$'} | Group-Object {if ($_.Name -match '^log - (\d{2})-(\d{2})-(\d{2})') {$mm = $matches[1]; $dd = $matches[2]; $yy = $matches[3]; $fileDate = Get-Date "$mm-$dd-20$yy"
+if ($fileDate -lt $today) {"$mm-$dd-$yy"} else {$null}}} | Where-Object {$_.Name} | ForEach-Object {$date = $_.Name; $output = Join-Path $logdir "log - $date.log"; $_.Group | Sort-Object LastWriteTime | ForEach-Object {Get-Content $_.FullName | Add-Content -Path $output}
+$_.Group | ForEach-Object {Remove-Item $_.FullName -Force}
+gziplog $output; Remove-Item $output -Force}}
+
 function login {# Display initial login screen.
 $script:sessionstart = Get-Date; $key = $null
 Write-Host -f yellow "`n+-------------------------------+`n|🔑 Secure Paschwords Manager 🔒|`n|-------------------------------|" -n
@@ -1201,16 +1226,7 @@ $script:sessionstart = Get-Date; $choice = $null
 loadjson
 rendermenu
 scheduledbackup
-
-# Combine previous day's log files into single date files and remove old log files.
-$today = (Get-Date).Date
-
-Get-ChildItem -Path $logdir -Filter 'log - *.log' | Where-Object {$_.Name -match '^log - (\d{2}-\d{2}-\d{2})' -and $_.Name -notmatch 'log - \d{2}-\d{2}-\d{2}\.log$'} | Group-Object {($_.Name -match '^log - (\d{2})-(\d{2})-(\d{2})') | Out-Null
-$fileDate = Get-Date "$($matches[1])-$($matches[2])-20$($matches[3])"
-if ($fileDate -lt $today) {return $matches[0]} else {return $null}} | Where-Object {$_.Name} | ForEach-Object {$date = $_.Name; $output = Join-Path $logdir "log - $date.log"
-
-$_.Group | Sort-Object LastWriteTime | ForEach-Object {Get-Content $_.FullName | Add-Content -Path $output}
-$_.Group | ForEach-Object {Remove-Item $_.FullName -Force}}
+logcleanup
 
 do {# Wait for a keypress, in order to refresh the screen.
 while (-not [Console]::KeyAvailable -and -not $script:quit) {
@@ -1475,10 +1491,9 @@ default {if ($choice.length -gt 0) {$script:warning = "'$choice' is an invalid c
 $script:sessionstart = Get-Date
 $choice = $null}} while (-not $script:quit)}
 
-#------------------------ Verify password before allowing access. ---------------------------------
-initialize; setdefaults; login
-if (-not $script:key -and (Test-Path $script:keyfile -ErrorAction SilentlyContinue)) {loginfailed}
-else {loggedin}}
+# Initialize and launch.
+initialize; setdefaults; resizewindow; login
+if (-not $script:key -and (Test-Path $script:keyfile -ErrorAction SilentlyContinue)) {loginfailed} else {loggedin}}
 
 Export-ModuleMember -Function paschwords
 
@@ -1534,7 +1549,7 @@ By typing a series of options at the design prompt, users can create paschword p
 
 • [A]lphanumeric: This is your most common paschword generator, starting with a base of letters and numbers to create a random string of characters.
 
-----------------------------------------------------------------------------------------------------
+## Paschword Word Derivations
 A few notes about the word derivations:
 
 • All of the options except for PIN will randomize the case of words, so that there should always be a strong mix of upper-case and lower-case letters.
@@ -1562,7 +1577,7 @@ If the Special or Zuper special character options are chosen, a minimum of 1 cha
 The final element determines the paschword length, with a previously stated minimum of 4 and maximum of 32, but 16 in the case of a PIN.
 
 • [#]4-32 characters in length.
-----------------------------------------------------------------------------------------------------
+## Paschword Generator Examples
 What does this look like in practice?
 
 P12: Would generate a 12 character PIN.
