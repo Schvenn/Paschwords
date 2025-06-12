@@ -721,6 +721,9 @@ if ($tagsAdded.Count -gt 0) {Write-Host -f Yellow "Tag types added:" -n; Write-H
 Write-Host -f Yellow "Tags added:" -n; Write-Host -f White " $($tagsAdded.Name -join ', ')"}
 Write-Host -f Cyan "`n↩️Return" -n; Read-Host}
 
+function saveandsort {# Sort the database by tag, then by title.
+$script:jsondatabase = $script:jsondatabase | Sort-Object {($_.Tags -join ' ').ToLower()}, {$_.Title.ToLower()}; savetodisk}
+
 function sometestfunction {# Various testing functions via F10
 # Create a bogus entry to test the validate function.
 # $entry = [PSCustomObject]@{Title = "Batman"}; $script:jsondatabase += $entry; savetodisk
@@ -1480,6 +1483,10 @@ limitedaccess; modifyconfiguration; $script:database = $script:defaultdatabase; 
 if ($script:unlocked) {$script:message = "New configuration active. Default key and database successfully loaded and made active."; nowarning}
 rendermenu}
 
+'F12' {# Sort and resave database.
+limitedaccess; if ($standarduser) {break}
+saveandsort; if ($script:message) {$script:message += "`nDatabase has been sorted by tag, then title."}; rendermenu}
+
 'OEM3' {# Test function while in development.
 #if ($script:standarduser -eq $true) {$script:standarduser = $false; $script:message = "Limited access is disabled."; nowarning; rendermenu}
 #elseif ($script:standarduser -eq $false -or -not $script:standarduser) {$script:standarduser = $true; $script:message = "Limited access is enabled."; nowarning; rendermenu}
@@ -1510,11 +1517,14 @@ It is best practice to save key files somewhere distant from the databases. Savi
 
 The import function is extremely powerful, accepting non-standard fields and importing them as tags, notes, or both. This should make it capable of importing password databases from a wide variety of other password managers, commercial and otherwise. Press 'I' in management mode for more details.
 
-You can use 'F4' to disable logging for the currently loaded key, but only while it's loaded. As soon as another key is loaded, including the same one, logging resumes.
-
-You can use 'F9' to see the current script configuration details and 'F10' to change them.
-
 When the clipboard empties, it is first overwritten with junk, in order to reduce memory artefacts. Clipboard managers would make this pointless, but this method can still be effective in commercial environments, provided proper application hygeine is in place.
+
+There are also some hidden keys within the main menu:
+
+• Use 'F4' to disable logging for the currently loaded key, until the key is locked or unloaded.
+• Use 'F9' to see the current script configuration details and 'F10' to change them.
+• Use 'F12' to sort the currently loaded database by tag, then title and save the changes to disk.
+
 ## PSD1 Configuration
 
 You can view the current configuration with F9 and edit it with F10. These settings are all loaded from the accomanying PSD1 file:
