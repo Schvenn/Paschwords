@@ -68,6 +68,7 @@ You can then add or import entries as required.
     backupfrequency = '7'
     logretention = '30'
     keydir = 'DefaultPowerShellDirectory\Modules\Paschwords\keys'
+    useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
     }}
 
 A separate script "ValidateURLs.ps1" is included to test a file containing a list of URLs for connectivity. This is designed to be used with the Valid URLs search and export function within the module, but I am keeping it separate in order to ensure the Paschword manager remains completely offline and thereby limits its security exposure.
