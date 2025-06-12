@@ -21,6 +21,7 @@ $script:logretention = $config.PrivateData.logretention; if ([int]$script:logret
 $script:dictionaryfile = $config.PrivateData.dictionaryfile; $script:dictionaryfile = Join-Path $basemodulepath $script:dictionaryfile
 $script:backupfrequency = $config.PrivateData.backupfrequency
 $script:archiveslimit = $config.PrivateData.archiveslimit
+$script:useragent = $config.PrivateData.useragent
 
 # Initialize non-PSD1 variables.
 $script:message = $null; $script:warning = $null; neuralizer; $script:sessionstart = Get-Date; $script:lastrefresh = 1000; $script:management = $false; $script:quit = $false; $script:timetoboot = $null; $script:noclip = $noclip}
@@ -773,7 +774,7 @@ function launchvalidator {# Launch the validator in a separate window.
 $validator = Join-Path $PSScriptRoot "ValidateURLs.ps1"; $file = Join-Path $script:databasedir "validurls.txt"
 Write-Host -f cyan "Do you want to launch " -n; Write-Host -f white "ValidateURLs.ps1" -n; Write-Host -f cyan " in a separate window, to test that each of the URLs listed in " -n; Write-Host -f white "validurls.txt" -n; Write-Host -f cyan " are still active? (Y/N) " -n; $proceed = Read-Host
 if ($proceed -match "^[Yy]") {if (-not (Test-Path $validator)) {$script:warning = "ValidateURLs.ps1 not found at the expected path:`n$PSScriptRoot"; nomessage; rendermenu; return}
-Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $validator $file -safe" -WindowStyle Normal; $script:message = "ValidateURLs.ps1 is running in a separate window. Remember to check on it's progress."; nowarning}
+Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $validator $file -safe `"$script:useragent`"" -WindowStyle Normal; $script:message = "ValidateURLs.ps1 is running in a separate window. Remember to check on it's progress."; nowarning}
 else {$script:warning = "Aborted external URL validation script."}
 rendermenu; return}
 
@@ -1031,7 +1032,8 @@ expirywarning = @{desc='Password expiry (1–365 days)'; validate={param($v) try
 logretention = @{desc='Log retention (min 30 days)'; validate={param($v) try {[int]$v -ge 30} catch {$false}}}
 dictionaryfile = @{desc='Dictionary filename'; validate={param($v) $v -match '\S'}}
 backupfrequency = @{desc='Backup frequency (in days)'; validate={param($v) try {[int]$v -ge 1} catch {$false}}}
-archiveslimit = @{desc='Archives limit (files to retain)'; validate={param($v) try {[int]$v -ge 1} catch {$false}}}}
+archiveslimit = @{desc='Archives limit (files to retain)'; validate={param($v) try {[int]$v -ge 1} catch {$false}}}
+useragent = @{desc='User-Agent'; validate={param($v) $v -match '\S'}}}
 
 Write-Host -f yellow "`n`nCurrent Configuration:`n"; $i = 0
 Write-Host -f cyan "There are currently $($editable.count) configurable items in v$script:version.`n"
@@ -1455,7 +1457,7 @@ if ($proveit) {$script:disablelogging = $true; if ($script:keyfile -match '\\([^
 'F9' {# Configuration details.
 limitedaccess
 $fixedkeydir = $keydir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $fixeddatabasedir = $databasedir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $configfileonly = $script:configpath -replace '.+\\', ''; $keyfileonly = $defaultkey -replace '.+\\', ''; $databasefileonly = $defaultdatabase -replace '.+\\', ''; $dictionaryfileonly = $dictionaryfile -replace '.+\\', ''; $timeoutminutes = [math]::Floor($timeoutseconds / 60)
-$script:message = "Configuration Details:`n`nVersion:`t`t   $script:version`nConfiguration File Path: $configfileonly`nDefault Key:             $keyfileonly`nDefault Database:        $databasefileonly`nDictionary File:         $dictionaryfileonly`n`nSession Inactivity Timer: $timeoutseconds seconds / $timeoutminutes minutes`nScript Inactivity Timer:  $script:timetobootlimit minutes`nClipboard Timer:          $delayseconds seconds`nEntry Expiration Warning: $expirywarning days`nLog Retention:            $logretention days`nBackup Frequency:         $script:backupfrequency days`nArchives Limit:           $script:archiveslimit ZIP files`n`nDirectories:`n$fixedkeydir`n$fixeddatabasedir"; nowarning; rendermenu}
+$script:message = "Configuration Details:`n`nVersion:`t`t   $script:version`nConfiguration File Path: $configfileonly`nDefault Key:             $keyfileonly`nDefault Database:        $databasefileonly`nDictionary File:         $dictionaryfileonly`n`nSession Inactivity Timer: $timeoutseconds seconds / $timeoutminutes minutes`nScript Inactivity Timer:  $script:timetobootlimit minutes`nClipboard Timer:          $delayseconds seconds`nEntry Expiration Warning: $expirywarning days`nLog Retention:            $logretention days`nBackup Frequency:         $script:backupfrequency days`nArchives Limit:           $script:archiveslimit ZIP files`n`nDirectories:`n$fixedkeydir`n$fixeddatabasedir`n`nValidateURLs User-Agent:`n$script:useragent"; nowarning; rendermenu}
 
 'F10' {# Modify PSD1 configuration.
 limitedaccess; modifyconfiguration; $script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; Write-Host -f yellow "Reloading default key and database."; $script:key = decryptkey $script:keyfile
