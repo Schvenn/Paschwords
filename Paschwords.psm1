@@ -263,7 +263,7 @@ $page = 0}
 $page = 0}
 'Q' {nowarning; nomessage; rendermenu; return}
 'Escape' {nowarning; nomessage; rendermenu; return}
-'X' {if (-not $standarduser) {if ($validurls) {$outpath = Join-Path $script:databasedir 'validurls.txt'; $entries.URL | Sort-Object -Unique | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f white "Exported $($entries.Count) valid URLs to: $outpath"; Write-Host -f cyan "`n↩️[RETURN] " -n; Read-Host; return}
+'X' {if (-not $standarduser) {if ($validurls) {$outpath = Join-Path $script:databasedir 'validurls.txt'; $entries.URL | Sort-Object -Unique | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f cyan "`n`nExported " -n; Write-Host -f white "$($entries.Count)" -n; Write-Host -f cyan " valid URLs to: " -n; Write-Host -f white "$outpath"; launchvalidator; rendermenu; return}
 elseif (-not $validurls) {$outpath = Join-Path $script:databasedir 'searchresults.txt'; @($entries) | Select-Object Title, Username, URL, Tags, Created, Expires | ConvertTo-Csv -NoTypeInformation | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f white "Exported $($entries.Count) entries to: $outpath"; Write-Host -f cyan "`n↩️[RETURN] " -n; Read-Host; rendermenu; return}}}
 default {}}}}
 
@@ -306,16 +306,16 @@ else {$invalidentry = "`nInvalid entry. Try again."}}
 while ($true)}
 
 # Decrypt password field safely
-$plain = "🚫 <no password saved> 🚫"
-if ($selected.Password -and $selected.Password -ne "") {try {$plain = decryptpassword $selected.Password}
-catch {$plain = "⚠️ <unable to decrypt password> ⚠️"}}
+$passwordplain = "🚫 <no password saved> 🚫"
+if ($selected.Password -and $selected.Password -ne "") {try {$passwordplain = decryptpassword $selected.Password}
+catch {$passwordplain = "⚠️ <unable to decrypt password> ⚠️"}}
 
 # Copy to clipboard unless -noclip switch is set
-if (-not $noclip.IsPresent) {try {$plain | Set-Clipboard; clearclipboard} 
+if (-not $noclip.IsPresent) {try {$passwordplain | Set-Clipboard; clearclipboard} 
 catch {}}
 
 # Compose formatted output message
-$script:message = "`n🗓️ Created:  $($selected.Created)`n⌛ Expires:  $($selected.Expires)`n📜 Title:    $($selected.Title)`n🆔 UserName: $($selected.Username)`n🔐 Password: $plain`n🔗 URL:      $($selected.URL)`n🏷️ Tags:     $($selected.Tags)`n------------------------------------`n📝 Notes:`n`n$($selected.Notes)"; nowarning; rendermenu}
+$script:message = "`n🗓️ Created:  $($selected.Created)`n⌛ Expires:  $($selected.Expires)`n📜 Title:    $($selected.Title)`n🆔 UserName: $($selected.Username)`n🔐 Password: $passwordplain`n🔗 URL:      $($selected.URL)`n🏷️ Tags:     $($selected.Tags)`n------------------------------------`n📝 Notes:`n`n$($selected.Notes)"; nowarning; rendermenu}
 
 function export ($path, $fields) {# Export current in-memory database content to CSV
 if (-not $script:jsondatabase) {$script:warning = "No database content is currently loaded."; nomessage; rendermenu; return}
@@ -431,6 +431,7 @@ elseif ($script:jsondatabase -isnot [System.Collections.IEnumerable] -or $script
 $script:jsondatabase += $entry; savetodisk}
 
 function updateentry ($database = $script:jsondatabase, $keyfile = $script:keyfile, $searchterm) {# Find and update an existing entry.
+$passwordplain = $null
 
 # Validate search term
 if (-not $searchterm -or $searchterm.Length -lt 3) {$script:warning = "Search term too short. Use 3 or more characters."; nomessage; rendermenu; return}
@@ -446,13 +447,12 @@ $entryMatches  = @(); foreach ($entry in $database) {if ($entry.Title -match $se
 if ($entryMatches.Count -eq 0) {$script:warning = "No entry found matching '$searchterm'."; nomessage; rendermenu; return}
 elseif ($entryMatches.Count -gt 1) {$script:warning = "Multiple entries found ($($entryMatches.Count)). Please refine your search."; nomessage; rendermenu; return}
 
-# Get password.
-$passwordplain = decryptpassword $entry.Password
-
 Write-Host -f cyan "`nUpdate Entry:"
 Write-Host -f yellow ("-" * 36)
 
 $entry = $entryMatches[0]
+$passwordplain = decryptpassword $entry.Password
+
 Write-Host -f white "🗓️ Created:  $($entry.Created)`n⌛ Expires:  $($entry.Expires)`n📜 Title:    $($entry.Title)`n🆔 UserName: $($entry.Username)`n🔐 Password: $passwordplain`n🔗 URL:      $($entry.URL)`n🏷️ Tags:     $($entry.Tags)`n------------------------------------`n📝 Notes:`n`n$($entry.Notes)"
 
 # Prompt user for updated values
@@ -766,6 +766,14 @@ if ($chosenFile -match '(?i)((\\[^\\]+){2}\\[^\\]+\.ZIP)') {$shortfile = $matche
 $script:message = "Restored '$($dbFile.Name)' and '$($keyFile.Name)' from backup: $shortfile"; nowarning}
 catch {$script:warning = "Restore failed:`n$_"; nomessage}
 finally {if (Test-Path $tempDir) {Remove-Item $tempDir -Recurse -Force}}}
+
+function launchvalidator {# Launch the validator in a separate window.
+$validator = Join-Path $PSScriptRoot "ValidateURLs.ps1"; $file = Join-Path $script:databasedir "validurls.txt"
+Write-Host -f cyan "Do you want to launch " -n; Write-Host -f white "ValidateURLs.ps1" -n; Write-Host -f cyan " in a separate window, to test that each of the URLs listed in " -n; Write-Host -f white "validurls.txt" -n; Write-Host -f cyan " are still active? (Y/N) " -n; $proceed = Read-Host
+if ($proceed -match "^[Yy]") {if (-not (Test-Path $validator)) {$script:warning = "ValidateURLs.ps1 not found at the expected path:`n$PSScriptRoot"; nomessage; rendermenu; return}
+Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $validator $file" -WindowStyle Normal; $script:message = "ValidateURLs.ps1 is running in a separate window. Remember to check on it's progress."; nowarning}
+else {$script:warning = "Aborted external URL validation script."}
+rendermenu; return}
 
 function paschwordgenerator ($design, [switch]$regenerate) {# Create an intuitive password
 $specialChars = '~!@#$%^&*_+=.,;:-'.ToCharArray(); $superSpecialChars = '(){}[]'.ToCharArray(); $leetMap = @{'a' = @('@','4'); 'e' = @('3'); 'h' = @('#'); 'l' = @('1','7','!'); 'o' = @('0'); 's' = @('5','$')}
@@ -1219,8 +1227,8 @@ logchoices $choice $script:message $script:warning
 switch ($choice) {
 'A' {# Add a new entry.
 if ($script:database -and $script:keyfile -and $script:unlocked) {$addorupdate = $null; Write-Host -f yellow "`n`nAdd a new entry, or Update an existing one? (Add/Update) " -n; $addorupdate = Read-Host
-if ($addorupdate -match "(?i)a(dd)?") {newentry $script:database $script:keyfile; rendermenu}
-elseif ($addorupdate -match "(?i)u(pdate)?") {Write-Host -f green "`n🔓 Enter Title, 🆔 Username, 🔗 URL, 🏷  Tag or 📝 Note to identify entry: " -n; $searchterm = Read-Host
+if ($addorupdate -match "(?i)^a(dd)?") {newentry $script:database $script:keyfile; rendermenu}
+elseif ($addorupdate -match "(?i)^u(pdate)?") {Write-Host -f green "`n🔓 Enter Title, 🆔 Username, 🔗 URL, 🏷  Tag or 📝 Note to identify entry: " -n; $searchterm = Read-Host
 if ([string]::IsNullOrWhiteSpace($searchterm)) {$script:warning = "No search term provided."; nomessage; rendermenu}
 elseif ($searchterm) {updateentry $script:jsondatabase $script:keyfile $searchterm}}}
 else {$script:warning = "A database and key must be opened and unlocked to add an entry."; nomessage; rendermenu}}
