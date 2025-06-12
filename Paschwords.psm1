@@ -39,7 +39,7 @@ if (-not (Test-Path $script:keyfile -ErrorAction SilentlyContinue) -and -not (Te
 
 function resizewindow {# Attempt to set window size if it's too small and the environment is not running inside Terminal.
 $minWidth = 130; $minHeight = 50; $buffer = $Host.UI.RawUI.BufferSize; $window = $Host.UI.RawUI.WindowSize
-if ($env:WT_SESSION -and ($window.Width -lt $minWidth -or $window.Height -lt $minHeight)) {Write-Host -f red "`nWarning:" -n; Write-Host -f white " You are running PowerShell inside Windows Terminal and this module is therefore unable to resize the window. Please manually resize it to at least $minWidth by $minHeight for best performance. Your current window size is $($window.Width) by $($window.Height)."}
+if ($env:WT_SESSION -and ($window.Width -lt $minWidth -or $window.Height -lt $minHeight)) {Write-Host -f red "`nWarning:" -n; Write-Host -f white " You are running PowerShell inside Windows Terminal and this module is therefore unable to resize the window. Please manually resize it to at least $minWidth by $minHeight for best performance. Your current window size is $($window.Width) by $($window.Height)."; return}
 if ($buffer.Width -lt $minWidth) {$buffer.Width = $minWidth}
 if ($buffer.Height -lt $minHeight) {$buffer.Height = $minHeight}
 $Host.UI.RawUI.BufferSize = $buffer
