@@ -44,7 +44,7 @@ You can then add or import entries as required.
     # Core module details
     @{
     RootModule = 'Paschwords.psm1'
-    ModuleVersion = '3.98'
+    ModuleVersion = '3.99'
     GUID = 'd4f71764-0e43-4632-8b35-0f0a79b36f62'
     Author = 'Schvenn'
     CompanyName = 'Plath Consulting Incorporated'
