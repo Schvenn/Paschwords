@@ -18,7 +18,7 @@ function renderscreen {$elapsed = (Get-Date) - $startTime; $processed = $validat
 if ($processed -gt 0) {$average = ($timings | Measure-Object -Average).Average; $estimated = [timespan]::FromSeconds($average * $remaining)}
 else {$estimated = [timespan]::Zero}
 
-cls; Write-Host -f yellow "URL Validator v1.2:"
+cls; Write-Host -f yellow "URL Validator v1.3:"
 Write-Host -f yellow ("-" * 50)
 Write-Host -f cyan "User-Agent:`t`t"-n; Write-Host -f white "$useragent"
 Write-Host -f yellow ("-" * 50)
