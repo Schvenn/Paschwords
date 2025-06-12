@@ -6,7 +6,7 @@ if (-not $useragent) {$useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Ap
 if ($safe) {$headers = @{"User-Agent" = $useragent}}
 else {$headers = @{}}
 
-if (-not $filename) {Write-Host -f white "`nThis tool evaluates a list of URLs to ensure they are still active. To use it, provide a text file containing a list of URLs you need to validate, one entry per line.`n"; Write-Host -f cyan "`tUsage: validateurls <filename>`n";return}
+if (-not $filename) {Write-Host -f white "`nThis tool evaluates a list of URLs to ensure they are still active. To use it, provide a text file containing a list of URLs you need to validate, one entry per line.`n"; Write-Host -f cyan "`tUsage: validateurls <filename> -safe <user-agent>`n";return}
 if (-not (Test-Path $filename)) {Write-Host -f red "`nFile not found: $filename`n"; return}
 
 $urls = Get-Content $filename | Where-Object {$_.Trim() -ne ""}; $total = $urls.Count; $validated = 0; $invalid = 0; $retryList = @(); $count2xx = 0; $count401 = 0; $count403 = 0; $count429 = 0; $count500 = 0; $count503 = 0; $countOtherInvalid = 0; $validList = @(); $invalidList = @(); $startTime = Get-Date; $timings = [System.Collections.Generic.Queue[double]]::new(); $windowSize = 3
