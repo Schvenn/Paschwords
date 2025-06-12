@@ -1041,15 +1041,26 @@ if ($input -ne '') {if (-not (& $editable[$key].validate $input)) {Write-Host -f
 else {$config[$key] = "$input"; Write-Host -f green "$key updated to '$input'"}}}
 
 # Rebuild psd1 content
-$lines = @()
-$lines += "# Core module details`n@{"
-foreach ($k in $manifest.Keys) {if ($k -ne 'PrivateData') {$v = $manifest[$k]
+# Save new file with predictable key order
+$lines = @(); $lines += "# Core module details`n@{"
+
+# Desired order for top-level keys
+$topKeys = 'RootModule','ModuleVersion','GUID','Author','CompanyName','Copyright','Description'
+foreach ($k in $topKeys) {if ($manifest.ContainsKey($k)) {$v = $manifest[$k]
+if ($v -is [string]) {$lines += "$k = '$v'"}
+elseif ($v -is [array]) {$lines += "$k = @('" + ($v -join "', '") + "')"}
+else {$lines += "$k = $v"}}}
+
+# Handle all remaining non-PrivateData keys not in topKeys
+foreach ($k in $manifest.Keys | Where-Object {$_ -notin $topKeys -and $_ -ne 'PrivateData'}) {$v = $manifest[$k]
 if ($v -is [string]) {$lines += "$k = '$v'"}
 elseif ($v -is [array]) {$lines += "$k = @('" + ($v -join "', '") + "')"}
 else {$lines += "$k = $v"}}
-else {$lines += "`n# Configuration data"; $lines += "PrivateData = @{"
+
+# Append PrivateData block
+$lines += "`n# Configuration data"; $lines += "PrivateData = @{"
 foreach ($sk in $config.Keys) {$sv = $config[$sk]; $lines += "$sk = '$sv'"}
-$lines += "}"}}; $lines += "}"
+$lines += "}}"
 
 # Save new file
 Set-Content -Path $configpath -Value $lines -Encoding UTF8; Write-Host -f green "`nConfiguration updated successfully."; initialize; return}
