@@ -773,7 +773,7 @@ function launchvalidator {# Launch the validator in a separate window.
 $validator = Join-Path $PSScriptRoot "ValidateURLs.ps1"; $file = Join-Path $script:databasedir "validurls.txt"
 Write-Host -f cyan "Do you want to launch " -n; Write-Host -f white "ValidateURLs.ps1" -n; Write-Host -f cyan " in a separate window, to test that each of the URLs listed in " -n; Write-Host -f white "validurls.txt" -n; Write-Host -f cyan " are still active? (Y/N) " -n; $proceed = Read-Host
 if ($proceed -match "^[Yy]") {if (-not (Test-Path $validator)) {$script:warning = "ValidateURLs.ps1 not found at the expected path:`n$PSScriptRoot"; nomessage; rendermenu; return}
-Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $validator $file" -WindowStyle Normal; $script:message = "ValidateURLs.ps1 is running in a separate window. Remember to check on it's progress."; nowarning}
+Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $validator $file -safe" -WindowStyle Normal; $script:message = "ValidateURLs.ps1 is running in a separate window. Remember to check on it's progress."; nowarning}
 else {$script:warning = "Aborted external URL validation script."}
 rendermenu; return}
 
