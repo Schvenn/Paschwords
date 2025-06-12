@@ -24,7 +24,7 @@ $script:archiveslimit = $config.PrivateData.archiveslimit
 $script:useragent = $config.PrivateData.useragent
 
 # Initialize non-PSD1 variables.
-$script:message = $null; $script:warning = $null; neuralizer; $script:sessionstart = Get-Date; $script:lastrefresh = 1000; $script:management = $false; $script:quit = $false; $script:timetoboot = $null; $script:noclip = $noclip}
+$script:message = $null; $script:warning = $null; neuralizer; $script:sessionstart = Get-Date; $script:lastrefresh = 1000; $script:management = $false; $script:quit = $false; $script:timetoboot = $null; $script:noclip = $noclip; $script:disablelogging = $false}
 
 function setdefaults {# Set Key and Database defaults.
 # Check database validity.
@@ -132,6 +132,7 @@ if (-not (Test-Path $script:database)) {$script:warning = "Database file not fou
 if (-not (Test-Path $script:keyfile)) {$script:warning = "Keyfile not found: $script:keyfile"; nomessage; return}
 if (-not $script:key) {$script:warning = "Key not loaded. You must call decryptkey first."; nomessage; return}
 
+$script:disablelogging = $false
 try {$encryptedBytes = [System.IO.File]::ReadAllBytes($script:database); $aes = [System.Security.Cryptography.Aes]::Create(); $aes.Key = $script:key; $aes.IV = $encryptedBytes[0..15]; $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC; $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
 
 # Decrypt the rest of the bytes (after the IV)
@@ -1097,7 +1098,7 @@ function linecap {Write-Host -f cyan "|"}
 
 # Title and countdown timer.
 cls; ""; endcap
-startline; Write-Host -f white "🔑 Secure Paschwords Manager v$script:version 🔒".padright(53) -n
+startline; Write-Host -f white " 🔑 Secure Paschwords Manager v$script:version 🔒".padright(53) -n
 if ($script:unlocked) {if ($countdown -ge 540) {Write-Host -f green "🔒 in $($script:minutes +1) minutes " -n}
 elseif ($countdown -lt 540 -and $countdown -ge 60) {Write-Host -f green " 🔒 in $($script:minutes +1) minutes " -n}
 elseif ($countdown -lt 60) {Write-Host -f red -n ("      🔒 in 0:{0:D2} " -f $script:seconds)}
@@ -1111,8 +1112,8 @@ if ($script:keyfile) {$displaykey = Split-Path -Leaf $script:keyfile -ErrorActio
 $databasestatus = if ($db -and $key -and $db -ne $key) {"🤔"} elseif ($displaykey -eq "none loaded" -or $displaydatabase -eq "none loaded" -or $script:unlocked -eq $false) {"🔒"} else {"🔓"}
 $keystatus = if ($script:unlocked -eq $false -or $displaykey -eq "none loaded") {"🔒"} else {"🔓"}
 
-startline; Write-Host -f white " Current database: " -n; Write-Host -f green "$displaydatabase $databasestatus".padright(34) -n
-Write-Host -f yellow "⏱️ [T]imer reset." -n; linecap
+startline; Write-Host -f white " Current database: " -n; Write-Host -f green "$displaydatabase $databasestatus".padright(33) -n
+Write-Host -f yellow "⏱️ [T]imer reset. " -n; linecap
 startline; Write-Host -f white " Current key: " -n; Write-Host -f green "$displaykey $keystatus".padright(35) -n
 if ($displaydatabase -eq "none loaded" -or $displaykey -eq "none loaded") {Write-Host -f green "♻️ Rel[O]ad defaults." -n} else {Write-Host (" " * 21) -n};linecap
 
@@ -1156,10 +1157,10 @@ startline; Write-Host -f cyan " >  " -n; Write-Host -f yellow "📦→︎ Restor
 horizontal}
 
 # Session options.
-startline; if ($script:unlocked -eq $true) {Write-Host "🔓 " -n} else {Write-Host "🔒 " -n}
+startline; if ($script:unlocked -eq $true) {Write-Host " 🔓 " -n} else {Write-Host " 🔒 " -n}
 if ($script:unlocked -eq $true) {Write-Host -f red "[L]ock Session " -n} else {Write-Host -f darkgray "[L]ock Session " -n}
 Write-Host -f white "/ " -n;
-if ($script:unlocked -eq $true) {Write-Host -f darkgray "[U]nlock session".padright(23) -n} else {Write-Host -f green "[U]nlock session".padright(23) -n}
+if ($script:unlocked -eq $true) {Write-Host -f darkgray "[U]nlock session".padright(22) -n} else {Write-Host -f green "[U]nlock session".padright(22) -n}
 if (-not (Test-Path $script:keyfile -ErrorAction SilentlyContinue)) {Write-Host -f black -b yellow "❓ [H]elp <-- " -n; Write-Host "".padright(4) -n}
 else {Write-Host -f yellow "❓ [H]elp".padright(17) -n}
 Write-Host -f gray "⏏️ [ESC] " -n;; linecap
@@ -1357,7 +1358,8 @@ if (-not $dbFiles) {$script:warning = "No .pwdb files found."; nomessage; render
 else {Write-Host -f white "`n`n📑 Available Password Databases:"; Write-Host -f yellow ("-" * 70)
 for ($i = 0; $i -lt $dbFiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $dbFiles[$i].Name}
 Write-Host -f green "`n📑 Enter number of the database file to use: " -n; $sel = Read-Host
-if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $dbFiles.Count) {$script:jsondatabase = $null; $script:database = $dbFiles[$sel - 1].FullName; $dbloaded = $script:database -replace '.+\\Modules\\', ''; loadjson; $script:message = "$dbloaded selected and made active."; if ($script:jsondatabase.Count -eq 0) {$script:warning = "If changing database and key combinations, always load the key before the database."} else {nowarning}}
+if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $dbFiles.Count) {$script:jsondatabase = $null; $script:database = $dbFiles[$sel - 1].FullName; $dbloaded = $script:database -replace '.+\\Modules\\', ''; loadjson; $script:message = "$dbloaded selected and made active."
+if ($script:jsondatabase.Count -eq 0) {$script:warning = "If changing database and key combinations, always load the key before the database."} else {nowarning}}
 else {$script:warning = "Invalid selection."; nomessage}; rendermenu}}
 
 'P' {# Create a new password database.
@@ -1418,7 +1420,7 @@ restore; rendermenu}
 $script:message = "Session locked."; nowarning; neuralizer; if ($script:noclip -eq $false) {clearclipboard 0 64}; rendermenu}
 
 'U' {# Unlock session.
-if ($script:keyfile) {""; $key = decryptkey $script:keyfile}
+if ($script:keyfile) {""; decryptkey $script:keyfile}
 else {$script:warning = "🔑 No key loaded."; nomessage}
 if ($script:unlocked) {loadjson; $script:message += " Session unlocked."}; nowarning; rendermenu}
 
@@ -1466,11 +1468,9 @@ nomessage; nowarning; rendermenu}
 
 'F4' {# Turn off Logging.
 limitedaccess; if ($standarduser) {break}
-if ($script:disablelogging) {$script:message = "Logging is already turned off for the current key activity."; nowarning; rendermenu}
-
-else {$proveit = $null; ""; $proveit = decryptkey $script:keyfile
-if (-not $proveit) {$proveit = $null; $script:warning = "Password failed or aborted. Logging is still active."; nomessage; rendermenu}
-if ($proveit) {$script:disablelogging = $true; if ($script:keyfile -match '\\([^\\]+)$') {$shortkey = $matches[1]} ; $script:warning = "Logging turned off for $shortkey @ $(Get-Date)"; nomessage; rendermenu}}}
+if ($script:keyfile -match '\\([^\\]+)$') {$shortkey = $matches[1]}
+if ($script:disablelogging -eq $true) {$script:warning = "Logging is already turned off for $shortkey."; nomessage; rendermenu; break}
+elseif ($script:disablelogging -eq $false) {$script:disablelogging = $true; $script:warning = "Logging temporarily turned off for $shortkey @ $(Get-Date)"; nomessage; rendermenu}}
 
 'F9' {# Configuration details.
 limitedaccess
