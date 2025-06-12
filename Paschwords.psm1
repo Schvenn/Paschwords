@@ -1454,10 +1454,9 @@ if ($script:unlocked) {loadjson; Write-Host -f yellow "`nHow many minutes should
 else {$script:warning = "Invalid timer value set."; nomessage; rendermenu}}}}
 
 'O' {# Reload defaults.
-if (-not $script:database -or -not $script:keyfile) {$script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; ""; $script:key = decryptkey $script:keyfile; 
-if ($script:unlocked) {$script:message = "Defaults successfully loaded and made active."; nowarning; rendermenu}
-else {$script:database = $null; $script:keyfile = $null; rendermenu}}
-else {rendermenu}}
+if (-not $script:database -or -not $script:keyfile) {$script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; ""; decryptkey $script:keyfile
+if ($script:unlocked) {loadjson; $script:message += " Defaults successfully loaded and made active."; nowarning; rendermenu}
+else {$script:database = $null; $script:keyfile = $null; rendermenu}}}
 
 'BACKSPACE' {# Clear messages.
 nomessage; nowarning; rendermenu}
