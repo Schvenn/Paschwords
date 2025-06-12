@@ -25,4 +25,5 @@ delayseconds = '30'
 backupfrequency = '7'
 logretention = '30'
 keydir = 'DefaultPowerShellDirectory\Modules\Paschwords\keys'
+useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
 }}
