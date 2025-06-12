@@ -56,3 +56,4 @@ $directory = split-path (resolve-path $filename); $timestamp = Get-Date -Format 
 $validList | Set-Content "$directory\validatedurls, $timestamp.txt"; $invalidList | Set-Content "$directory\expiredurls, $timestamp.txt"
 
 Write-Host -f green "`nValidation complete. Results saved to " -n; Write-Host -f white "validatedurls.txt" -n; Write-Host -f green " and " -n; Write-Host -f white "expiredurls.txt" -n; Write-Host -f green ".`n"
+Write-Host -f white "`n↩️ EXIT " -n; Read-Host
