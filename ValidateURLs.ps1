@@ -18,7 +18,7 @@ function renderscreen {$elapsed = (Get-Date) - $startTime; $processed = $validat
 if ($processed -gt 0) {$average = ($timings | Measure-Object -Average).Average; $estimated = [timespan]::FromSeconds($average * $remaining)}
 else {$estimated = [timespan]::Zero}
 
-cls; Write-Host -f yellow "URL Validator v1.3:"
+cls; Write-Host -f yellow "URL Validator v1.2:"
 Write-Host -f yellow ("-" * 50)
 Write-Host -f cyan "User-Agent:`t`t"-n; Write-Host -f white "$useragent"
 Write-Host -f yellow ("-" * 50)
@@ -37,7 +37,7 @@ Write-Host -f cyan "403: Forbidden:`t`t  "-n; Write-Host -f white "$count403"
 Write-Host -f cyan "429: Too Many Requests:   "-n; Write-Host -f white "$count429"
 Write-Host -f cyan "500: Server Error:`t  "-n; Write-Host -f white "$count500"
 Write-Host -f cyan "503: Service Unavailable: "-n; Write-Host -f white "$count503"
-Write-Host -f cyan "Other Invalid:`t`t  "-n; Write-Host -f white "$countOtherInvalid"}
+Write-Host -f cyan "Other Invalid:`t`t  "-n; Write-Host -f white "$countOtherInvalid`n"}
 
 function testurl($url) {$usedGet = $false; try {$response = Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop}
 catch {$usedGet = $true; try {$response = Invoke-WebRequest -Uri $url -Method Get -Headers $headers -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop}
@@ -69,5 +69,5 @@ renderscreen; Start-Sleep -Milliseconds 100}}
 $directory = split-path (resolve-path $filename); $timestamp = Get-Date -Format "yyyy-MM-dd @ HH-mm-ss"
 $validList | Set-Content "$directory\validatedurls, $timestamp.txt"; $invalidList | Set-Content "$directory\expiredurls, $timestamp.txt"
 
-Write-Host -f yellow "`nValidation complete. Results saved to " -n; Write-Host -f white "validatedurls.txt" -n; Write-Host -f yellow " and " -n; Write-Host -f white "expiredurls.txt" -n; Write-Host -f yellow "."
+Write-Host -f yellow "Validation complete. Results saved to " -n; Write-Host -f white "validatedurls.txt" -n; Write-Host -f yellow " and " -n; Write-Host -f white "expiredurls.txt" -n; Write-Host -f yellow "."
 Write-Host -f cyan "`n↩️ EXIT " -n; Read-Host
