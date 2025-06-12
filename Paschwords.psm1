@@ -441,7 +441,9 @@ $key = if ($script:unlocked) {$script:realKey} else {decryptkey $keyfile; nowarn
 if (-not $script:key) {$script:warning = "🔑 No key loaded."; rendermenu; return}
 
 # Match entries by Title, Username, URL, Tags, Notes
-$entryMatches  = @(); foreach ($entry in $database) {if ($entry.Title -match $searchterm -or $entry.Username -match $searchterm -or $entry.URL -match $searchterm -or $entry.Tags -match $searchterm -or $entry.Notes -match $searchterm) {$entryMatches  += $entry}}
+$searchterm = "(?i)$searchterm"; $searchterm = $searchterm -replace '\s*,\s*', '.+'
+$entryMatches  = @(); foreach ($entry in $database) {$fullentry = "$($entry.Title) $($entry.Username) $($entry.URL) $($entry.Tags -join ' ') $($entry.Notes)"
+if ($fullentry -match $searchterm) {$entryMatches += $entry}}
 
 # Handle results
 if ($entryMatches.Count -eq 0) {$script:warning = "No entry found matching '$searchterm'."; nomessage; rendermenu; return}
@@ -1227,11 +1229,12 @@ logchoices $choice $script:message $script:warning
 switch ($choice) {
 'A' {# Add a new entry.
 if ($script:database -and $script:keyfile -and $script:unlocked) {$addorupdate = $null; Write-Host -f yellow "`n`nAdd a new entry, or Update an existing one? (Add/Update) " -n; $addorupdate = Read-Host
+if (-not $addorupdate) {$script:warning = "Aborted."; nomessage; rendermenu; break}
 if ($addorupdate -match "(?i)^a(dd)?") {newentry $script:database $script:keyfile; rendermenu}
-elseif ($addorupdate -match "(?i)^u(pdate)?") {Write-Host -f green "`n🔓 Enter Title, 🆔 Username, 🔗 URL, 🏷  Tag or 📝 Note to identify entry: " -n; $searchterm = Read-Host
-if ([string]::IsNullOrWhiteSpace($searchterm)) {$script:warning = "No search term provided."; nomessage; rendermenu}
+elseif ($addorupdate -match "(?i)^u(pdate)?") {Write-Host -f green "`n🔓 Enter Title, 🆔 Username, 🔗 URL, 🏷  Tag or 📝 Note to identify entry (comma separated): " -n; $searchterm = Read-Host
+if ([string]::IsNullOrWhiteSpace($searchterm)) {$script:warning = "No search term provided."; nomessage; rendermenu; break}
 elseif ($searchterm) {updateentry $script:jsondatabase $script:keyfile $searchterm}}}
-else {$script:warning = "A database and key must be opened and unlocked to add an entry."; nomessage; rendermenu}}
+else {$script:warning = "A database and key must be opened and unlocked to add an entry."; nomessage; rendermenu; break}}
 
 'R' {# Retrieve an entry.
 if (-not $script:keyfile) {$script:warning = "🔑 No key loaded."; nomessage}
