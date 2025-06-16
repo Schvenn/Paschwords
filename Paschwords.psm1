@@ -6,25 +6,30 @@ $script:database = $database; $script:keyfile = $keyfile; $script:powershell = S
 if (!(Test-Path $script:configpath)) {throw "Config file not found at $script:configpath"}
 $config = Import-PowerShellDataFile -Path $configpath
 
-# Initialize Key and Database.
+# Initialize Hash, Key and Database directories.
 $script:keydir = $config.PrivateData.keydir; $script:defaultkey = $config.PrivateData.defaultkey; $script:keydir = $script:keydir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:defaultkey = Join-Path $script:keydir $script:defaultkey
 
 $script:databasedir = $config.PrivateData.databasedir; $script:defaultdatabase = $config.PrivateData.defaultdatabase; $script:databasedir = $script:databasedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:defaultdatabase = Join-Path $script:databasedir $script:defaultdatabase
 
-# Import PSD1 Settings.
+$script:privilegedir = $config.PrivateData.privilegedir; $script:privilegedir = $script:privilegedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell)
+
+# Import PSD1 settings.
 $script:version = $config.ModuleVersion
 $script:delayseconds = $config.PrivateData.delayseconds
-$script:timeoutseconds = $config.PrivateData.timeoutseconds; if ([int]$script:timeoutseconds -gt 5940) {$script:timeoutseconds = 5940}
-$script:timetobootlimit = $config.PrivateData.timetobootlimit#; if ([int]$script:timetobootlimit -gt 120) {$script:timetobootlimit = 120}
-$script:expirywarning = $config.PrivateData.expirywarning; if ([int]$script:expirywarning -gt 365) {$script:expirywarning = 365}
+$script:timeoutseconds = $config.PrivateData.timeoutseconds; if ([int]$script:timeoutseconds -gt 5940 -or [int]$script:timeoutseconds -lt 0) {$script:timeoutseconds = 5940}
+$script:timetobootlimit = $config.PrivateData.timetobootlimit; if ([int]$script:timetobootlimit -gt 120 -or [int]$script:timetobootlimit -lt 0) {$script:timetobootlimit = 120}
+$script:expirywarning = $config.PrivateData.expirywarning; if ([int]$script:expirywarning -gt 365 -or [int]$script:expirywarning -lt 0) {$script:expirywarning = 365}
 $script:logretention = $config.PrivateData.logretention; if ([int]$script:logretention -lt 30) {$script:logretention = 30}
 $script:dictionaryfile = $config.PrivateData.dictionaryfile; $script:dictionaryfile = Join-Path $basemodulepath $script:dictionaryfile
 $script:backupfrequency = $config.PrivateData.backupfrequency
 $script:archiveslimit = $config.PrivateData.archiveslimit
 $script:useragent = $config.PrivateData.useragent
 
+# Initialize privilege settings.
+$script:rootKeyFile = "$privilegedir\root.key"; $script:hashFile = "$privilegedir\password.hash"
+
 # Initialize non-PSD1 variables.
-$script:message = $null; $script:warning = $null; neuralizer; $script:sessionstart = Get-Date; $script:lastrefresh = 1000; $script:management = $false; $script:quit = $false; $script:timetoboot = $null; $script:noclip = $noclip; $script:disablelogging = $false}
+$script:failedmaster = 0; $script:lockoutmaster = $false; $script:keypasscount = Get-Random -Minimum 3 -Maximum 50; $script:message = $null; $script:warning = $null; neuralizer; $script:sessionstart = Get-Date; $script:lastrefresh = 1000; $script:management = $false; $script:quit = $false; $script:timetoboot = $null; $script:noclip = $noclip; $script:disablelogging = $false; $script:logdir = Join-Path $PSScriptRoot 'logs'}
 
 function setdefaults {# Set Key and Database defaults.
 # Check database validity.
@@ -43,7 +48,7 @@ if ($env:WT_SESSION -and ($window.Width -lt $minWidth -or $window.Height -lt $mi
 if ($buffer.Width -lt $minWidth) {$buffer.Width = $minWidth}
 if ($buffer.Height -lt $minHeight) {$buffer.Height = $minHeight}
 $Host.UI.RawUI.BufferSize = $buffer
-try {if ($window.Width -lt $minWidth) { $window.Width = $minWidth}
+try {if ($window.Width -lt $minWidth) {$window.Width = $minWidth}
 if ($window.Height -lt $minHeight){$window.Height = $minHeight}
 $Host.UI.RawUI.WindowSize = $window}
 catch {Write-Host -f red "`nWarning:" -n; Write-Host -f white " Unable to resize window. Please manually resize to at least $minWidth x $minHeight."}
@@ -98,121 +103,271 @@ if ($index -ge 1 -and $index -le $sections.Count) {$selection = $index}
 else {$selection = $null}} else {""; return}}
 while ($true); return}
 
+#---------------------------------------------PRIVILEGE FUNCTIONS----------------------------------
+
+function masterlockout {# Master password failure lockout.
+$flagfile = Join-Path $script:privilegedir 'masterfailed.flag'
+if (Test-Path $flagfile) {$lastWrite = (Get-Item $flagfile).LastWriteTime
+if ((Get-Date) - $lastWrite -lt [TimeSpan]::FromMinutes(30)) {$script:lockoutmaster = $true}}
+if ($script:failedmaster -gt 3 -or $script:lockoutmaster) {Set-Content -Path $flagfile -Value "Too many failed attempts: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -Encoding UTF8; $script:warning = "❌ Too many failed attempts. Access locked for 30 minutes."; nomessage; rendermenu; $script:lockoutmaster = $true; return $true}
+$script:lockoutmaster = $false; return $false}
+
+function initializeprivilege ([byte[]]$Key, [string]$Master) {# Generate random AES key if not provided
+if (-not $Key) {$Key = New-Object byte[] 32; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($Key)}
+
+# Prompt for master password if not provided
+if (-not $Master) {$secure1 = Read-Host -AsSecureString "Create master password"; 
+$str = [System.Net.NetworkCredential]::new("", $secure1).Password
+if ($str -notmatch '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).{8,}$') {$script:warning = "Password must be at least 8 characters long and include upper-case and lower-case letters, digits and symbols."; rendermenu; return}
+$secure2 = Read-Host -AsSecureString "Confirm password"
+if (-not (Compare-SecureString $secure1 $secure2)) {$script:warning = "Passwords do not match."; rendermenu; return}
+$Master = [System.Net.NetworkCredential]::new("", $secure1).Password}
+if (Test-Path $rootKeyFile) {$script:warning = "Privilege system already initialized."; rendermenu; return}
+
+# Generate random 16-byte salt for key wrapping
+$wrapSalt = New-Object byte[] 16; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($wrapSalt); $wrapKey = derivekeyfrompassword -Password $Master -Salt $wrapSalt
+
+# Encrypt the AES key with the wrap key
+$encRoot = protectbytesaeshmac $Key $wrapKey
+
+# Save the keyfile: prepend salt + encrypted root key
+New-Item -ItemType Directory -Force -Path $privilegedir | Out-Null; [IO.File]::WriteAllBytes($rootKeyFile, $wrapSalt + $encRoot)
+
+# Generate random salt for verification hash
+$verifSalt = New-Object byte[] 16; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($verifSalt)
+
+# Derive verification key from master password + verification salt
+$verifKey = derivekeyfrompassword -Password $Master -Salt $verifSalt
+
+# Store verification salt + SHA256 hash of verification key
+$hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($verifKey); [System.IO.File]::WriteAllBytes($hashFile, $verifSalt + $hash)
+
+$script:message = "Master password and privilege key initialized with random salt."; rendermenu; return}
+
+function createperentryhmac ([object]$entry, [byte[]]$key) {# Individual Entry HMAC.
+$json = $entry | ConvertTo-Json -Compress -Depth 5; $bytes = [System.Text.Encoding]::UTF8.GetBytes($json); $hmac = [System.Security.Cryptography.HMACSHA256]::new($key)
+try {$hash = $hmac.ComputeHash($bytes); $result = [Convert]::ToBase64String($hash)}
+finally {$hmac.Dispose()}
+return $result}
+
+function verifyentryhmac ([object]$entry) {# Verify individual entry HMAC.
+if (-not $entry.data -or -not $entry.hmac) {return $false}
+$expected = createperentryhmac -entry $entry.data -key $script:key; return (comparebytearrays ([Convert]::FromBase64String($entry.hmac)) ([Convert]::FromBase64String($expected)))}
+
+function comparebytearrays ([byte[]]$a, [byte[]]$b) {# HMAC verification.
+if ($a.Length -ne $b.Length) {return $false}
+$diff = 0; for ($i = 0; $i -lt $a.Length; $i++) {$diff = $diff -bor ($a[$i] -bxor $b[$i])}; return ($diff -eq 0)}
+
+function verifymasterpassword ($Password) {# Verify master password.
+if (-not (Test-Path $script:hashFile)) {return $false}
+
+[byte[]]$bytes = [System.IO.File]::ReadAllBytes($script:hashFile)
+if (-not $bytes -or $bytes.Length -lt 48) {return $false}
+
+$salt = $bytes[0..15]; $storedHash = $bytes[16..47]; $derivedKey = derivekeyfrompassword -Password $Password -Salt $salt; $sha = [System.Security.Cryptography.SHA256]::Create(); $computedHash = $sha.ComputeHash($derivedKey); $sha.Dispose()
+return (comparebytearrays -a $computedHash -b $storedHash)}
+
+function rotatemasterpassword {# Allow changing master password.
+
+if (masterlockout) {return}
+$oldPwd = Read-Host -AsSecureString "`n`nEnter current master password"
+
+if (-not (verifymasterpassword $oldPwd)) {$script:failedmaster ++; $script:warning = "Wrong master password. $([math]::Max(0,4 - $script:failedmaster)) attempts remain before lockout."; nomessage; rendermenu; return}
+
+function loadprivilegekey ($Password) {# Load privileged key.
+[byte[]]$enc = [System.IO.File]::ReadAllBytes($script:rootKeyFile); $wrapSalt = $enc[0..15]; $encRoot = $enc[16..($enc.Length - 1)]; $wrapKey = derivekeyfrompassword -Password $Password -Salt $wrapSalt; return unprotectbytesaeshmac $encRoot $wrapKey}
+
+function comparesecurestring ($a, $b) {if (-not ($a -is [SecureString] -and $b -is [SecureString])) {return $false}
+$bstr1 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($a); $bstr2 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($b)
+try {$str1 = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr1); $str2 = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr2)
+$bytes1 = [Text.Encoding]::Unicode.GetBytes($str1); $bytes2 = [Text.Encoding]::Unicode.GetBytes($str2)
+if ($bytes1.Length -ne $bytes2.Length) {return $false}
+$diff = 0
+for ($i = 0; $i -lt $bytes1.Length; $i++) {$diff = $diff -bor ($bytes1[$i] -bxor $bytes2[$i])}
+return ($diff -eq 0)}
+finally {[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr1); [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr2)}}
+
+$rootKey = loadprivilegekey $oldPwd; $newPwd = Read-Host -AsSecureString "New password"; $plainPwd = [System.Net.NetworkCredential]::new("", $newPwd).Password
+if ($plainPwd -notmatch '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).{8,}$') {$script:warning = "Password must be at least 8 characters long and include upper-case and lower-case letters, digits and symbols."; rendermenu; return}
+$newPwd2 = Read-Host -AsSecureString "Confirm new password"
+if (-not (comparesecurestring $newPwd $newPwd2)) {$script:warning = "Password mismatch."; nomessage; rendermenu; return}
+
+$newWrapSalt = New-Object byte[] 16; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($newWrapSalt); $newWrapKey = derivekeyfrompassword -Password $newPwd -Salt $newWrapSalt; $encRoot = Protect-Bytes $rootKey $newWrapKey; [System.IO.File]::WriteAllBytes($script:rootKeyFile, $encRoot); $salt = New-Object byte[] 16; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($salt); $verifKey = derivekeyfrompassword -Password $newPwd -Salt $salt; $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($verifKey); [System.IO.File]::WriteAllBytes($script:hashFile, $salt + $hash); $script:message = "Master password rotated successfully."; nowarning; rendermenu; return}
+
+function derivekeyfrompassword ([object]$Password, [byte[]]$Salt) {# Derive a key from the provided password.
+
+# Convert string to SecureString if needed
+if ($Password -is [string]) {$secure = ConvertTo-SecureString $Password -AsPlainText -Force}
+elseif ($Password -is [SecureString]) {$secure = $Password}
+else {$script:warning = "Password must be string or SecureString."; nomessage; rendermenu; return}
+
+# Extract plaintext password from SecureString
+$bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+try {$plain = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)}
+finally {[System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)}
+
+# Derive key
+$pbkdf2 = [System.Security.Cryptography.Rfc2898DeriveBytes]::new($plain, $Salt, 100000)
+try {return $pbkdf2.GetBytes(64)}
+finally {$pbkdf2.Dispose()}}
+
+function protectbytesaeshmac ([byte[]]$PlainBytes, [byte[]]$Key) {# Derived from password, split into encryption & HMAC keys.
+$aesKey = $Key[0..31]; $hmacKey = $Key[32..63]
+
+$iv = New-Object byte[] 16; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($iv)
+
+$aes = [System.Security.Cryptography.Aes]::Create(); $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC; $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7; $aes.Key = $aesKey; $aes.IV = $iv; $encryptor = $aes.CreateEncryptor(); $cipherText = $encryptor.TransformFinalBlock($PlainBytes, 0, $PlainBytes.Length)
+
+$hmac = [System.Security.Cryptography.HMACSHA256]::new($hmacKey); $hmacData = $iv + $cipherText; $hmacBytes = $hmac.ComputeHash($hmacData); 
+
+$encryptor.Dispose(); $aes.Dispose(); $hmac.Dispose()
+return $hmacBytes + $hmacData}
+
+function unprotectbytesaeshmac ([byte[]]$ProtectedBytes, [byte[]]$Key) {# Decode both keys. 
+$aesKey = $Key[0..31]; $hmacKey = $Key[32..63]; $hmacBytes = $ProtectedBytes[0..31]; $hmacBytes = [byte[]]$hmacBytes; $iv = $ProtectedBytes[32..47]; $cipherText = $ProtectedBytes[48..($ProtectedBytes.Length - 1)]
+
+$hmac = [System.Security.Cryptography.HMACSHA256]::new($hmacKey); $hmacData = $iv + $cipherText; $computedHmac = $hmac.ComputeHash($hmacData); $hbLen = $hmacBytes.Length; $chLen = $computedHmac.Length; $hbType = $hmacBytes.GetType().FullName; $chType = $computedHmac.GetType().FullName
+if (-not [System.Linq.Enumerable]::SequenceEqual($hmacBytes, $computedHmac)) {$script:warning = "`nHMAC validation failed. Data may have been tampered with or corrupted. Proceed with caution!"; rendermenu; return}
+
+$aes = [System.Security.Cryptography.Aes]::Create(); $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC; $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7; $aes.Key = $aesKey; $aes.IV = $iv; $decryptor = $aes.CreateDecryptor(); $plainBytes = $decryptor.TransformFinalBlock($cipherText, 0, $cipherText.Length)
+
+$decryptor.Dispose(); $aes.Dispose(); $hmac.Dispose()
+return [byte[]]$plainBytes}
+
+function fulldbexport {# Export the current database with all passwords in plaintext.
+
+if (masterlockout) {return}
+Write-Host -f green  "`n`t👑 Master Password " -n; $master = Read-Host -AsSecureString
+if (-not (verifymasterpassword $master)) {$script:failedmaster ++; $script:warning = "Wrong master password. $([math]::Max(0,4 - $script:failedmaster)) attempts remain before lockout."; nomessage; rendermenu; return}
+
+# Verify database password
+$script:key = $null; decryptkey $script:keyfile
+if (-not $script:key) {$script:warning += "Wrong database password. Aborting export."; nomessage; rendermenu; return}
+
+# Decrypt full database contents
+$databasename = [System.IO.Path]::GetFileNameWithoutExtension($script:database)
+$fullexport = Join-Path $script:privilegedir "fullexport_$databasename.csv"
+$decrypted = @()
+
+$exporterrors = 0; ""
+foreach ($entry in $script:jsondatabase) {try {$plaintext = @{Title = $entry.data.Title
+Username = $entry.data.Username
+Password = if (decryptpassword $entry.data.Password) {$entry.data.Password} else {"[DECRYPTION FAILED]"}
+URL = $entry.data.URL
+Tags = $entry.data.Tags -join ', '
+Notes = $entry.data.Notes
+Created = $entry.data.Created
+Expires = $entry.data.Expires}
+$decrypted += [pscustomobject]$plaintext}
+catch {Write-Host "'$($entry.data.Title)' encountered an error, but will be exported, if possible: $_"; $exporterrors ++; $decrypted += [pscustomobject]$plaintext}}
+
+if ($exporterrors -gt 0) {Write-Host -f yellow "`nPress [ENTER] once you have reviewed the errors. " -n; Read-Host}
+# Export to CSV
+$decrypted | Sort-Object Title | Export-Csv -NoTypeInformation -Encoding UTF8 -Path $fullexport
+$script:message = "$databasename exported to fullexport_$databasename.csv"; nowarning; rendermenu; return}
+
 #---------------------------------------------SECURE FILE MANAGEMENT FUNCTIONS---------------------
 
 function decryptkey ($keyfile = $script:keyfile) {# Decrypt a keyfile and start session.
 nomessage; nowarning
 if (-not (Test-Path $keyfile -ErrorAction SilentlyContinue)) {$script:warning = "Encrypted key file not found."; nomessage; return}
-$raw = [IO.File]::ReadAllBytes($keyfile); $salt = $raw[0..15]; $iv = $raw[16..31]; $cipher = $raw[32..($raw.Length - 1)]
 
-Write-Host -f green "`n`t🔐 Password: " -n; $secureMaster = Read-Host -AsSecureString; $master = [System.Net.NetworkCredential]::new("", $secureMaster).Password; $pbkdf2 = New-Object Security.Cryptography.Rfc2898DeriveBytes($master, $salt, 10000); $protectKey = $pbkdf2.GetBytes(32)
-$aes = [System.Security.Cryptography.Aes]::Create(); $aes.Key = $protectKey; $aes.IV = $iv; $decryptor = $aes.CreateDecryptor()
-try {$decrypted = $decryptor.TransformFinalBlock($cipher, 0, $cipher.Length)
+# Load entire keyfile bytes
+$raw = [IO.File]::ReadAllBytes($keyfile)
 
-if ([System.Text.Encoding]::UTF8.GetString($decrypted[0..3]) -ne 'SCHV') {$script:warning = "Marker mismatch. Keyfile is invalid or corrupted."; $script:keyfile = $null; $script:database = $null; return}
-$script:key = $decrypted[4..($decrypted.Length - 1)]; $script:unlocked = $true; $script:sessionstart = Get-Date; $script:timetoboot = $null}
+# Extract the first 16 bytes as the salt
+$salt = $raw[0..15]
 
-catch {$script:warning = "Incorrect master password or corrupted key file. Clearing key and database settings."; $script:keyfile = $null; $script:database = $null; nomessage}}
+# Remaining bytes are the encrypted key
+$encKey = $raw[16..($raw.Length - 1)]
 
-function encryptpassword ($password) {# Encrypt a password using AES-256-CBC with Base64 output
-$aes = [System.Security.Cryptography.Aes]::Create(); $aes.Key = $script:key; $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC; $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7; $aes.GenerateIV(); $iv = $aes.IV; $encryptor = $aes.CreateEncryptor(); $plainBytes = [System.Text.Encoding]::UTF8.GetBytes($password); $cipherBytes = $encryptor.TransformFinalBlock($plainBytes, 0, $plainBytes.Length); $combinedBytes = $iv + $cipherBytes; $secure = [Convert]::ToBase64String($combinedBytes); return $secure}
+# Prompt for master password
+Write-Host -ForegroundColor Green "`n`t🔐 Password: " -n; $secureMaster = Read-Host -AsSecureString; $master = [System.Net.NetworkCredential]::new("", $secureMaster).Password; $secureMaster.Dispose()
+try {$wrapKey = derivekeyfrompassword -Password $master -Salt $salt; $script:key = [byte[]](unprotectbytesaeshmac $encKey $wrapKey)[0..31]; $script:unlocked = $true; $script:sessionstart = Get-Date; $script:timetoboot = $null}
+catch {$script:warning = "Incorrect master password or corrupted key file. Clearing key and database settings."; $script:keyfile = $null; $script:database = $null; $script:unlocked = $false; nomessage}}
 
-function decryptpassword ($encryptedBase64) {# Decrypt the password fields seperately.
-$fullCipher = [Convert]::FromBase64String($encryptedBase64); $aes = [System.Security.Cryptography.Aes]::Create(); $aes.Key = $script:key; $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC; $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
+function encryptpassword ($plaintext) {# Encrypt using AES-HMAC and Base64
+$bytes = [Text.Encoding]::UTF8.GetBytes($plaintext); return [Convert]::ToBase64String((protectbytesaeshmac $bytes $script:key))}
 
-# Extract IV from first 16 bytes (AES block size)
-$iv = $fullCipher[0..15]; $cipherBytes = $fullCipher[16..($fullCipher.Length - 1)]; $aes.IV = $iv
+function decryptpassword ($base64) {# Decrypt AES-HMAC Base64 password
+$bytes = unprotectbytesaeshmac ([Convert]::FromBase64String($base64)) $script:key; 
+return [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0x00..[char]0x1F)}
 
-$decryptor = $aes.CreateDecryptor(); $plainBytes = $decryptor.TransformFinalBlock($cipherBytes, 0, $cipherBytes.Length)
-return [System.Text.Encoding]::UTF8.GetString($plainBytes)}
-
-function loadjson {# Load and decrypt a database, but not the passwords.
-# Error-checking.
+function loadjson {# Load and decrypt the database (without passwords)
 if (-not (Test-Path $script:database)) {$script:warning = "Database file not found: $script:database"; nomessage; return}
 if (-not (Test-Path $script:keyfile)) {$script:warning = "Keyfile not found: $script:keyfile"; nomessage; return}
 if (-not $script:key) {$script:warning = "Key not loaded. You must call decryptkey first."; nomessage; return}
 
-$script:disablelogging = $false
-try {$encryptedBytes = [System.IO.File]::ReadAllBytes($script:database); $aes = [System.Security.Cryptography.Aes]::Create(); $aes.Key = $script:key; $aes.IV = $encryptedBytes[0..15]; $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC; $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
+try {$bytes = [System.IO.File]::ReadAllBytes($script:database); $hmacStored = $bytes[-32..-1]; $ivPlusCipher = $bytes[0..($bytes.Length - 33)]; $hmac = [System.Security.Cryptography.HMACSHA256]::new($script:key); $hmacActual = $hmac.ComputeHash($ivPlusCipher)
 
-# Decrypt the rest of the bytes (after the IV)
-$decryptor = $aes.CreateDecryptor(); $cipherBytes = $encryptedBytes[16..($encryptedBytes.Length - 1)]; $decryptedBytes = $decryptor.TransformFinalBlock($cipherBytes, 0, $cipherBytes.Length)
+if (-not (comparebytearrays $hmacStored $hmacActual)) {$script:warning = "⚠️  HMAC verification failed. The file may have been modified."; nomessage; return}
 
-# Decompress the decrypted bytes via GzipStream properly
+# Extract IV and Ciphertext
+$iv = $ivPlusCipher[0..15]; $cipherBytes = $ivPlusCipher[16..($ivPlusCipher.Length - 1)]
+
+# AES decrypt
+$aes = [System.Security.Cryptography.Aes]::Create()
+try {$aes.Key = $script:key; $aes.IV = $iv; $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC; $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7; $decryptor = $aes.CreateDecryptor(); $decryptedBytes = $decryptor.TransformFinalBlock($cipherBytes, 0, $cipherBytes.Length); $decryptor.Dispose()}
+finally {$aes.Dispose()}
+
+# Decompress
 $ms = [System.IO.MemoryStream]::new($decryptedBytes); $gzip = [System.IO.Compression.GzipStream]::new($ms, [System.IO.Compression.CompressionMode]::Decompress); $reader = [System.IO.StreamReader]::new($gzip); $jsonText = $reader.ReadToEnd(); $reader.Close()
 
-# Convert JSON text to object and store globally
-$script:jsondatabase = $jsonText | ConvertFrom-Json; $script:message = "Database loaded."; nowarning; return}
-catch {$script:warning = "Failed to load database: $_"; nomessage; return}}
+$script:jsondatabase = $jsonText | ConvertFrom-Json; $script:message = "Database loaded."; nowarning}
+catch {$script:warning = "Failed to load database: $_"; nomessage}}
 
-function savetodisk {# Save to disk (Serialized JSON → GZip compression → Prepend AES IV → AES-256-CBC encryption → Base64 encoded).
-# Clean-up.
-$password = $null; $passwordplain = $null
+function savetodisk {# Save to disk (Serialize JSON → Compress → Encrypt → Append HMAC)
+try {$jsonText = ,$script:jsondatabase | ConvertTo-Json -Depth 5 -Compress; $jsonBytes = [System.Text.Encoding]::UTF8.GetBytes($jsonText)
 
-try {$jsonText = $script:jsondatabase | ConvertTo-Json -Depth 5 -Compress; $jsonBytes = [System.Text.Encoding]::UTF8.GetBytes($jsonText)
-
+# Compress
 $ms = [System.IO.MemoryStream]::new(); $gzip = [System.IO.Compression.GzipStream]::new($ms, [System.IO.Compression.CompressionMode]::Compress); $gzip.Write($jsonBytes, 0, $jsonBytes.Length); $gzip.Close(); $compressedBytes = $ms.ToArray()
 
-$aes = [System.Security.Cryptography.Aes]::Create(); $aes.Key = $script:key; $aes.GenerateIV(); $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC; $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7; $encryptor = $aes.CreateEncryptor(); $cipherBytes = $encryptor.TransformFinalBlock($compressedBytes, 0, $compressedBytes.Length); $finalBytes = $aes.IV + $cipherBytes
+# Encrypt
+$aes = [System.Security.Cryptography.Aes]::Create()
+try {$aes.Key = $script:key; $aes.GenerateIV(); $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC; $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7; $encryptor = $aes.CreateEncryptor()
+try {$cipherBytes = $encryptor.TransformFinalBlock($compressedBytes, 0, $compressedBytes.Length)}
+finally {$encryptor.Dispose()}
 
-[System.IO.File]::WriteAllBytes($script:database, $finalBytes)}
-catch {$script:warning = "❌ Failed to save updated database: $_"; nomessage}
-$script:message = "✅ Updated database saved successfully to disk."; nowarning}
+$ivPlusCipher = $aes.IV + $cipherBytes
 
-function neuralizer {# Wipe key and database from memory.
-$script:unlocked = $false; $choice = $null; $script:timetoboot = Get-Date; $keypasscount = Get-Random -Minimum 3 -Maximum 50; $databasepasscount = Get-Random -Minimum 3 -Maximum 10
-if ($script:noclip -eq $false) {clearclipboard 0 64}
+# Compute HMAC
+$hmac = [System.Security.Cryptography.HMACSHA256]::new($script:key); $hmacBytes = $hmac.ComputeHash($ivPlusCipher)
 
-function wipe ([byte[]]$buffer) {$originalLength = $buffer.Length
-for ($i = 0; $i -lt $keypasscount; $i++) {$multiplier = Get-Random -Minimum 1.1 -Maximum 3.9; $roundingMethod = Get-Random -InputObject 'Floor','Ceiling','Round'; $targetLength = [Math]::$roundingMethod($originalLength * $multiplier); $junk = New-Object byte[] $targetLength; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($junk); [Array]::Copy($junk, 0, $buffer, 0, $originalLength)}; $buffer = $null}
+# Final bytes = IV + Cipher + HMAC
+$finalBytes = $ivPlusCipher + $hmacBytes}
+finally {$aes.Dispose()}
 
-function corruptdatabase {if (-not ($script:jsondatabase -and $script:jsondatabase.Count -gt 0)) {return}
-for ($i = 0; $i -lt $databasepasscount; $i++) {foreach ($entry in $script:jsondatabase) {foreach ($property in $entry.PSObject.Properties) {$original = "$($property.Value)"
-if ([string]::IsNullOrEmpty($original)) {continue}
-$originalLength = $original.Length; $multiplier = Get-Random -Minimum 1.1 -Maximum 3.9; $roundingMethod = Get-Random -InputObject 'Floor','Ceiling','Round'; $targetLength = [Math]::$roundingMethod($originalLength * $multiplier); $junkBytes = New-Object byte[] $targetLength; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($junkBytes); $trimmed = $junkBytes[0..($originalLength - 1)]; $asciiJunk = ($trimmed | ForEach-Object {[char](($_ % 94) + 33)}) -join ''; $property.Value = $asciiJunk}}}; $script:jsondatabase = $null}
-
-function scramble ([string]$reference) {if ([string]::IsNullOrEmpty($reference)) {return}
-$length = $reference.Length
-for ($i = 0; $i -lt $passCount; $i++) {$multiplier = Get-Random -Minimum 1.1 -Maximum 3.9; $roundingMethod = Get-Random -InputObject 'Floor','Ceiling','Round'; $targetLength = [Math]::$roundingMethod($length * $multiplier)
-$junk = -join ((33..126) | Get-Random -Count $targetLength | ForEach-Object {[char]$_})
-$script:temp = $junk
-$reference = $junk}
-$reference = $null}
-
-# Overwrite byte and secure string variables
-if ($script:key -ne $null -and $script:key.Length -gt 0) {wipe $script:key}
-if ($secure -ne $null -and $secure.length -gt 0) {wipe $secure}
-corruptdatabase; scramble $password; scramble $passwordplain
-if ($script:quit -eq $true) {scramble $script:message; scramble $script:warning}}
+# Write file
+[System.IO.File]::WriteAllBytes($script:database, $finalBytes); $script:message = "✅ Updated database saved successfully to disk."; nowarning}
+catch {$script:warning = "❌ Failed to save updated database: $_"; nomessage}}
 
 function showentries ($entries, $pagesize = 30, [switch]$expired, [switch]$search, $keywords, [switch]$ips, [switch]$invalidurls, [switch]$validurls) {# Browse entire database.
 $sortField = $null; $descending = $false; $ippattern = "(?i)(\d{1,3}\.){3}\d{1,3}"; $urlpattern = "(?i)(\w+?:\/\/|www\.|^[A-Z\d-]{3,}\.[A-Z\d-]{2,})"
 
 # Expired filter.
-if ($expired) {$cutoffDate = (Get-Date).AddDays(-$script:expirywarning)
-$entries = $entries | Where-Object {[datetime]$_.Timestamp -lt $cutoffDate}}
+if ($expired) {$entries = $entries | Where-Object {[datetime]$_.data.Expires -le $(Get-Date)}}
 
 # Search filter.
-if ($search) {$pattern = "(?i)(" + ($keywords -replace "\s*,\s*", "|") + ")"; $filtered = @()
-foreach ($entry in $entries) {$joined = ($entry.PSObject.Properties | ForEach-Object {$_.Value}) -join "`n"
-if ($joined -match $pattern) {$filtered += $entry}}
+if ($search) {$filtered = @()
+foreach ($entry in $entries) {if ($entry.data.Title -match $keywords -or $entry.data.Username -match $keywords -or $entry.data.URL -match $keywords -or $entry.data.Tags -match $keywords -or $entry.data.Notes -match $keywords) {if (-not (verifyentryhmac $entry)) {$script:warning += "Entry $($entry.data.title) has an invalid HMAC and will be ignored. "; continue}
+$filtered += $entry}}
 $entries = $filtered}
 
 # Find IP filter.
 if ($ips) {$filtered = @()
-foreach ($entry in $entries) {$url = $entry.URL
+foreach ($entry in $entries) {$url = $entry.data.URL
 if ($url -match $ippattern) {$filtered += $entry}}
 $entries = $filtered}
 
 # Invalid URL filter.
 if ($invalidurls) {$filtered = @()
-foreach ($entry in $entries) {$url = $entry.URL
+foreach ($entry in $entries) {$url = $entry.data.URL
 if ($url -notmatch $ippattern -and $url -notmatch $urlpattern) {$filtered += $entry}}
 $entries = $filtered}
 
 # Valid URL filter.
 if ($validurls) {$filtered = @()
-foreach ($entry in $entries) {$url = $entry.URL
+foreach ($entry in $entries) {$url = $entry.data.URL
 if ($url -match $urlpattern) {$filtered += $entry}}
 $entries = $filtered}
 
@@ -222,20 +377,20 @@ if ($total -eq 0) {$script:warning = "No entries to view."; nomessage; rendermen
 if ($entries -isnot [System.Collections.IEnumerable] -or $entries -is [string]) {$entries = @($entries); $exportset = @($entries)}
 
 $page = 0
-while ($true) {cls; if ($sortField) {$entries = if ($descending) {$entries | Sort-Object $sortField -Descending} else {$entries | Sort-Object $sortField}}
+while ($true) {cls; if ($sortField) {$entries = @(if ($descending) {$entries | Sort-Object $sortField -Descending} else {$entries | Sort-Object $sortField})}
 $start = $page * $pagesize; $end = [math]::Min($start + $pagesize - 1, $total - 1); $chunk = $entries[$start..$end]
 
 # Show expired entries header if filtered by expired
-if ($expired) {$warningDate = (Get-Date).AddDays(-$script:expirywarning).ToShortDateString(); Write-Host -f White "Expired Entries: " -n; Write-Host -f Gray "The following entries are more than $script:expirywarning days ($warningDate) old since last update."; Write-Host -f Yellow ("-" * 130)}
+if ($expired) {Write-Host -f White "Expired Entries: " -n; Write-Host -f Gray "The following entries are older than their expiry date since last update."; Write-Host -f Yellow ("-" * 130)}
 
 # Display the entries in a formatted table
 $chunk | Select-Object `
-@{Name='Title'; Expression = {if ($_.Title.Length -gt 25) {$_.Title.Substring(0,22) + '...'} else {$_.Title}}}, `
-@{Name='Username'; Expression = {if ($_.Username.Length -gt 25) {$_.Username.Substring(0,22) + '...'} else {$_.Username}}}, `
-@{Name='URL'; Expression = {if ($_.URL.Length -gt 40) {$_.URL.Substring(0,37) + '...'} else {$_.URL}}}, `
-@{Name='Tags'; Expression = {if ($_.Tags.Length -gt 15) {$_.Tags.Substring(0,12) + '...'} else {$_.Tags}}}, `
-@{Name='Created'; Expression = {Get-Date $_.Created -Format 'yyyy-MM-dd'}}, `
-@{Name='Expires'; Expression = {Get-Date $_.Expires -Format 'yyyy-MM-dd'}} | Format-Table | Write-Output
+@{Name='Title'; Expression = {if ($_.data.Title.Length -gt 25) {$_.data.Title.Substring(0,22) + '...'} else {$_.data.Title}}}, `
+@{Name='Username'; Expression = {if ($_.data.Username.Length -gt 25) {$_.data.Username.Substring(0,22) + '...'} else {$_.data.Username}}}, `
+@{Name='URL'; Expression = {if ($_.data.URL.Length -gt 40) {$_.data.URL.Substring(0,37) + '...'} else {$_.data.URL}}}, `
+@{Name='Tags'; Expression = {if ($_.data.Tags.Length -gt 15) {$_.data.Tags.Substring(0,12) + '...'} else {$_.data.Tags}}}, `
+@{Name='Created'; Expression = {Get-Date $_.data.Created -Format 'yyyy-MM-dd'}}, `
+@{Name='Expires'; Expression = {Get-Date $_.data.Expires -Format 'yyyy-MM-dd'}} | Format-Table | Write-Output
 
 # Sorting arrow indicator
 $arrow = if ($descending) {"▾"} else {if (-not $sortField) {""} else {"▴"}}
@@ -279,41 +434,42 @@ $page = 0}
 $page = 0}
 'Q' {nowarning; nomessage; rendermenu; return}
 'Escape' {nowarning; nomessage; rendermenu; return}
-'X' {if (-not $standarduser) {if ($validurls) {$outpath = Join-Path $script:databasedir 'validurls.txt'; $entries.URL | Sort-Object -Unique | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f cyan "`n`nExported " -n; Write-Host -f white "$($entries.Count)" -n; Write-Host -f cyan " valid URLs to: " -n; Write-Host -f white "$outpath"; launchvalidator; rendermenu; return}
-elseif (-not $validurls) {$outpath = Join-Path $script:databasedir 'searchresults.txt'; @($entries) | Select-Object Title, Username, URL, Tags, Created, Expires | ConvertTo-Csv -NoTypeInformation | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f white "Exported $($entries.Count) entries to: $outpath"; Write-Host -f cyan "`n↩️[RETURN] " -n; Read-Host; rendermenu; return}}}
+'X' {if (-not $standarduser) {if ($validurls) {$outpath = Join-Path $script:databasedir 'validurls.txt'; $entries.data.URL | Sort-Object -Unique | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f cyan "`n`nExported " -n; Write-Host -f white "$($entries.Count)" -n; Write-Host -f cyan " valid URLs to: " -n; Write-Host -f white "$outpath"; launchvalidator; rendermenu; return}
+elseif (-not $validurls) {$outpath = Join-Path $script:databasedir 'searchresults.csv'; @($entries.data) | Select-Object Title, Username, URL, Tags, Created, Expires | ConvertTo-Csv -NoTypeInformation | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f white "Exported $($entries.Count) entries to: $outpath"; Write-Host -f cyan "`n↩️[RETURN] " -n; Read-Host; rendermenu; return}}}
 default {}}}}
 
 function retrieveentry ($database = $script:jsondatabase, $keyfile = $script:keyfile, $searchterm, $noclip) {
 
-# Validate minimum search length
+# Validate minimum search length.
 if (-not $searchterm -or $searchterm.Length -lt 3) {$script:warning = "Requested match is too small. Aborting search."; nomessage; return}
 
-# Ensure key is loaded (use cached if unlocked)
+# Ensure key is loaded, but use the cached key if unlocked.
 if ($script:unlocked -eq $true) {$key = $script:realKey}
 else {$key = decryptkey $keyfile; nomessage; nowarning
 if (-not $key) {$script:warning = "🔑 No key loaded. " + $script:warning; return}}
 
-# Case-insensitive match on Title, URL, Tags, or Notes
-$entrymatches = @()
-foreach ($entry in $script:jsondatabase) {if ($entry.Title -match $searchterm -or $entry.Username -match $searchterm -or $entry.URL -match $searchterm -or $entry.Tags -match $searchterm -or $entry.Notes -match $searchterm) {$entrymatches += $entry}}
+# Case-insensitive match on Title, URL, Tags, or Notes.
+$entrymatches = @(); $script:warning = $null
+foreach ($entry in $script:jsondatabase) {if ($entry.data.Title -match $searchterm -or $entry.data.Username -match $searchterm -or $entry.data.URL -match $searchterm -or $entry.data.Tags -match $searchterm -or $entry.data.Notes -match $searchterm) {if (-not (verifyentryhmac $entry)) {$script:warning += "Entry $($entry.data.title) has an invalid HMAC and will be ignored. "; continue}
+$entrymatches += $entry}}
 $total = $entrymatches.Count
 
-# Handle no matches or too many matches
+# Handle no matches or too many matches.
 if ($total -eq 0) {$script:warning = "🔐 No entry found matching '$searchterm'"; nomessage; return}
 elseif ($total -gt 15) {$script:warning = "Too many matches ($total). Please enter a more specific search."; nomessage; return}
 
-# If exactly one match, select it directly
+# If exactly one match, select it directly.
 if ($total -eq 1) {$selected = $entrymatches[0]}
 
-# Between 2 and 15 matches, display menu for user selection
+# Between 2 and 15 matches, display menu for user selection.
 else {$invalidentry = "`n"
 do {cls; Write-Host -f yellow "`nMultiple matches found:`n"
 for ($i = 0; $i -lt $total; $i++) {$m = $entrymatches[$i]
-$notesAbbrev = if ($m.Notes.Length -gt 40) {$m.Notes.Substring(0, 37) + "..."} else {$m.Notes}
+$notesAbbrev = if ($m.data.Notes.Length -gt 40) {$m.data.Notes.Substring(0, 37) + "..."} else {$m.data.Notes}
 $notesAbbrev = $notesAbbrev -replace "\r?\n", ""
-$urlAbbrev = if ($m.URL.Length -gt 45) {$m.URL.Substring(0, 42) + "..."} else {$m.URL}
-$tagsAbbrev = if ($m.Tags.Length -gt 42) {$m.Tags.Substring(0, 39) + "..."} else {$m.Tags}
-Write-Host -f Cyan ("{0}. " -f ($i + 1)).PadRight(4) -n; Write-Host -f Yellow "📜 Title: " -n; Write-Host -f White ($m.Title).PadRight(38) -n; Write-Host -f Yellow " 🆔 User: " -n; Write-Host -f White ($m.Username).PadRight(30) -n; Write-Host -f Yellow " 🔗 URL: " -n; Write-Host -f White $urlAbbrev.PadRight(46) -n; Write-Host -f Yellow "🏷️ Tags:  " -n; Write-Host -f White $tagsAbbrev.PadRight(42) -n; Write-Host -f Yellow " 📝 Notes: " -n; Write-Host -f White $notesAbbrev; Write-Host -f Gray ("-" * 100)}; Write-Host -f Red $invalidentry; Write-Host -f Yellow "🔍 Select an entry to view or Enter to cancel: " -n; $choice = Read-Host
+$urlAbbrev = if ($m.data.URL.Length -gt 45) {$m.data.URL.Substring(0, 42) + "..."} else {$m.data.URL}
+$tagsAbbrev = if ($m.data.Tags.Length -gt 42) {$m.data.Tags.Substring(0, 39) + "..."} else {$m.data.Tags}
+Write-Host -f Cyan ("{0}. " -f ($i + 1)).PadRight(4) -n; Write-Host -f Yellow "📜 Title: " -n; Write-Host -f White ($m.data.Title).PadRight(38) -n; Write-Host -f Yellow " 🆔 User: " -n; Write-Host -f White ($m.data.Username).PadRight(30) -n; Write-Host -f Yellow " 🔗 URL: " -n; Write-Host -f White $urlAbbrev.PadRight(46) -n; Write-Host -f Yellow "🏷️ Tags:  " -n; Write-Host -f White $tagsAbbrev.PadRight(42) -n; Write-Host -f Yellow " 📝 Notes: " -n; Write-Host -f White $notesAbbrev; Write-Host -f Gray ("-" * 100)}; Write-Host -f Red $invalidentry; Write-Host -f Yellow "🔍 Select an entry to view or Enter to cancel: " -n; $choice = Read-Host
 if ($choice -eq "") {$script:warning = "Password retrieval cancelled by user."; nomessage; return}
 
 $parsedChoice = 0; $refParsedChoice = [ref]$parsedChoice
@@ -321,17 +477,17 @@ if ([int]::TryParse($choice, $refParsedChoice) -and $refParsedChoice.Value -ge 1
 else {$invalidentry = "`nInvalid entry. Try again."}}
 while ($true)}
 
-# Decrypt password field safely
+# Decrypt password field safely.
 $passwordplain = "🚫 <no password saved> 🚫"
-if ($selected.Password -and $selected.Password -ne "") {try {$passwordplain = decryptpassword $selected.Password}
+if ($selected.data.Password -and $selected.data.Password -ne "") {try {$passwordplain = decryptpassword $selected.data.Password}
 catch {$passwordplain = "⚠️ <unable to decrypt password> ⚠️"}}
 
-# Copy to clipboard unless -noclip switch is set
+# Copy to clipboard unless -noclip switch is set.
 if (-not $noclip.IsPresent) {try {$passwordplain | Set-Clipboard; clearclipboard} 
 catch {}}
 
-# Compose formatted output message
-$script:message = "`n🗓️ Created:  $($selected.Created)`n⌛ Expires:  $($selected.Expires)`n📜 Title:    $($selected.Title)`n🆔 UserName: $($selected.Username)`n🔐 Password: $passwordplain`n🔗 URL:      $($selected.URL)`n🏷️ Tags:     $($selected.Tags)`n------------------------------------`n📝 Notes:`n`n$($selected.Notes)"; nowarning; rendermenu}
+# Compose formatted output message.
+$script:message = "`n🗓️ Created:  $($selected.data.Created)`n⌛ Expires:  $($selected.data.Expires)`n📜 Title:    $($selected.data.Title)`n🆔 UserName: $($selected.data.Username)`n🔐 Password: $passwordplain`n🔗 URL:      $($selected.data.URL)`n🏷️ Tags:     $($selected.data.Tags)`n------------------------------------`n📝 Notes:`n`n$($selected.data.Notes)"; nowarning; rendermenu}
 
 function export ($path, $fields) {# Export current in-memory database content to CSV
 if (-not $script:jsondatabase) {$script:warning = "No database content is currently loaded."; nomessage; rendermenu; return}
@@ -342,7 +498,8 @@ $invalidfields = $fieldList | Where-Object {$_ -notin $validfields}
 if ($invalidfields) {$script:warning = "Invalid field(s): $($invalidfields -join ', ')"; $script:message = "Allowed fields: $($validfields -join ', ')"; rendermenu; return}
 
 # $script:jsondatabase is assumed to be an array of objects (already parsed JSON)
-$filtered = $script:jsondatabase | ForEach-Object {$obj = [ordered]@{}
+$script:warning = $null; $filtered = $script:jsondatabase | ForEach-Object {if (-not (verifyentryhmac $_)) {$script:warning += "Entry $($_.Title) has an invalid HMAC and will be ignored. "; return}
+$obj = [ordered]@{}
 foreach ($field in $fieldList) {$value = $_.$field
 switch -Regex ($field) {'^Title$' {$obj['Title'] = $value; continue}
 '^Username$' {$obj['Username'] = $value; continue}
@@ -355,11 +512,11 @@ switch -Regex ($field) {'^Title$' {$obj['Title'] = $value; continue}
 default {$obj[$field] = $value}}}
 [pscustomobject]$obj}
 
-if (-not $filtered) {$script:warning = "No valid entries found in the in-memory database."; nomessage; return}
+if (-not $filtered) {$script:warning += "No valid entries found in the in-memory database."; nomessage; return}
 
 $filtered | Export-Csv -Path $path -NoTypeInformation -Force
 if ($path -match '(?i)((\\[^\\]+){2}\\\w+\.csv)') {$shortname = $matches[1]} else {$shortname = $path}
-$script:message = "Exported JSON database to: $shortname"; nowarning; rendermenu}
+$script:message = "Exported JSON database to: $shortname"; rendermenu}
 
 function newentry ($database = $script:database, $keyfile = $script:keyfile) {# Create a new entry.
 $answer = $null; $confirmDup = $null
@@ -380,7 +537,8 @@ Write-Host -f yellow "🔗 URL: " -n; $url = Read-Host
 if (-not $url) {$script:warning = "Every entry must have a URL, as well as a Title and Username. Aborted."; nomessage; rendermenu; return}
 Write-Host -f yellow "⏳ How many days before this password should expire? (Default = 365): " -n; $expireInput = Read-Host; $expireDays = 365
 if ([int]::TryParse($expireInput, [ref]$null)) {$expireDays = [int]$expireInput
-if ($expireDays -le 0) {$expireDays = 365}}
+if ($expireDays -gt 365) {$expireDays = 365}
+if ($expireDays -lt -365) {$expireDays = -365}}
 $expires = (Get-Date).AddDays($expireDays).ToString("yyyy-MM-dd")
 Write-Host -f yellow "🏷️ Tags: " -n; $tags = Read-Host; $tags = ($tags -split ',') | ForEach-Object {$_.Trim()} | Where-Object {$_} | Join-String -Separator ', '
 Write-Host -f yellow "📝 Notes (Enter, then CTRL-Z + Enter to end): " -n; $notes = [Console]::In.ReadToEnd()
@@ -430,15 +588,16 @@ if ($confirmDup -notmatch '^[Yy]') {$script:warning = "Entry not saved."; nomess
 $script:jsondatabase = $script:jsondatabase | Where-Object {!($_.Username -eq $username -and $_.URL -eq $url)}}}
 
 # Create the new entry object.
-$entry = [PSCustomObject]@{Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-Title     = $title
-Username  = $username
-Password  = $secure
-URL       = $url
-Tags      = $tags
-Notes     = $notes
-Created   = (Get-Date).ToString("yyyy-MM-dd")
-Expires   = $expires}
+$data = [PSCustomObject]@{Title = $title
+Username = $username
+Password = $secure
+URL = $url
+Tags = $tags
+Notes = $notes
+Created = (Get-Date).ToString("yyyy-MM-dd")
+Expires = $expires}
+$hmac = createperentryhmac $data $script:key
+$entry = [PSCustomObject]@{Data = $data; HMAC = $hmac}
 
 if (-not $script:jsondatabase) {$script:jsondatabase = @()} 
 elseif ($script:jsondatabase -isnot [System.Collections.IEnumerable] -or $script:jsondatabase -is [PSCustomObject]) {$script:jsondatabase = @($script:jsondatabase)}
@@ -449,19 +608,19 @@ $script:jsondatabase += $entry; savetodisk}
 function updateentry ($database = $script:jsondatabase, $keyfile = $script:keyfile, $searchterm) {# Find and update an existing entry.
 $passwordplain = $null
 
-# Validate search term
+# Validate search term.
 if (-not $searchterm -or $searchterm.Length -lt 3) {$script:warning = "Search term too short. Use 3 or more characters."; nomessage; rendermenu; return}
 
-# Load key if needed
+# Load key if needed.
 $key = if ($script:unlocked) {$script:realKey} else {decryptkey $keyfile; nowarning; nomessage}
 if (-not $script:key) {$script:warning = "🔑 No key loaded."; rendermenu; return}
 
-# Match entries by Title, Username, URL, Tags, Notes
+# Match entries by Title, Username, URL, Tags, Notes.
 $searchterm = "(?i)$searchterm"; $searchterm = $searchterm -replace '\s*,\s*', '.+'
-$entryMatches  = @(); foreach ($entry in $database) {$fullentry = "$($entry.Title) $($entry.Username) $($entry.URL) $($entry.Tags -join ' ') $($entry.Notes)"
+$entryMatches  = @(); foreach ($entry in $database) {$fullentry = "$($entry.data.Title) $($entry.data.Username) $($entry.data.URL) $($entry.data.Tags -join ' ') $($entry.data.Notes)"
 if ($fullentry -match $searchterm) {$entryMatches += $entry}}
 
-# Handle results
+# Handle results.
 if ($entryMatches.Count -eq 0) {$script:warning = "No entry found matching '$searchterm'."; nomessage; rendermenu; return}
 elseif ($entryMatches.Count -gt 1) {$script:warning = "Multiple entries found ($($entryMatches.Count)). Please refine your search."; nomessage; rendermenu; return}
 
@@ -469,16 +628,16 @@ Write-Host -f cyan "`nUpdate Entry:"
 Write-Host -f yellow ("-" * 36)
 
 $entry = $entryMatches[0]
-$passwordplain = decryptpassword $entry.Password
+$passwordplain = decryptpassword $entry.data.Password
 
-Write-Host -f white "🗓️ Created:  $($entry.Created)`n⌛ Expires:  $($entry.Expires)`n📜 Title:    $($entry.Title)`n🆔 UserName: $($entry.Username)`n🔐 Password: $passwordplain`n🔗 URL:      $($entry.URL)`n🏷️ Tags:     $($entry.Tags)`n------------------------------------`n📝 Notes:`n`n$($entry.Notes)"
+Write-Host -f white "🗓️ Created:  $($entry.data.Created)`n⌛ Expires:  $($entry.data.Expires)`n📜 Title:    $($entry.data.Title)`n🆔 UserName: $($entry.data.Username)`n🔐 Password: $passwordplain`n🔗 URL:      $($entry.data.URL)`n🏷️ Tags:     $($entry.data.Tags)`n------------------------------------`n📝 Notes:`n`n$($entry.data.Notes)"
 
-# Prompt user for updated values
+# Prompt user for updated values.
 Write-Host -f yellow "`n📝 Update entry fields. Leave blank to keep the current value.`n"
-Write-Host -f white "📜 Title ($($entry.Title)): " -n; $title = Read-Host
-Write-Host -f white "🆔 Username ($($entry.Username)): " -n; $username  = Read-Host
+Write-Host -f white "📜 Title ($($entry.data.Title)): " -n; $title = Read-Host
+Write-Host -f white "🆔 Username ($($entry.data.Username)): " -n; $username  = Read-Host
 
-# Password choice
+# Password choice.
 Write-Host -f yellow "`n🔐 Do you want to update the password? (Y/N) " -n; $updatepass = Read-Host
 if ($updatepass -match '^[Yy]') {Write-Host -f yellow "🔐 Do you want to want to keep a history of the old password in Notes? (Y/N) " -n; $passwordhistory = Read-Host
 Write-Host -f yellow "Use Paschword generator? (Y/N) " -n; $gen = Read-Host
@@ -487,46 +646,57 @@ while ($accept -match '^[Nn]') {$passplain = paschwordgenerator -regenerate; Wri
 else {Write-Host -f yellow "🔐 Password: " -n; $pass = Read-Host -AsSecureString
 try {$passplain = [System.Net.NetworkCredential]::new("", $pass).Password} catch {$passplain = ""}}
 try {$secure = encryptpassword $passplain $key} catch {$script:warning = "Password encryption failed."; nomessage; rendermenu; return}}
-else {$secure = $entry.Password}
+else {$secure = $entry.data.Password}
 
-Write-Host -f white "`n🔗 URL ($($entry.URL)): " -n; $url = Read-Host 
-Write-Host -f white  "⏳ Days before expiry (default: keep $($entry.Expires)) " -n; $expireIn = Read-Host
-Write-Host -f white "🏷️ Tags ($($entry.Tags)): " -n; $tags = Read-Host
+Write-Host -f white "`n🔗 URL ($($entry.data.URL)): " -n; $url = Read-Host 
+Write-Host -f white  "⏳ Days before expiry (default: keep $($entry.data.Expires)) " -n; $expireIn = Read-Host
+Write-Host -f white "🏷️ Tags ($($entry.data.Tags)): " -n; $tags = Read-Host
 Write-Host -f white "📝 Notes (CTRL-Z, Enter to leave unchanged): " -n
 $notesIn = [Console]::In.ReadToEnd()
-Write-Host -f yellow  "`nAre you satisfied with everything? (Y/N/Abandon) " -n; $abandon = Read-Host
+Write-Host -f yellow  "`nAre you satisfied with everything? (Y/N) " -n; $abandon = Read-Host
 if ($abandon -notmatch "^[Yy]") {$script:warning = "Abandoned updating entry."; nomessage; rendermenu; return}
 
-# Expiration logic
+# Expiration logic.
 if ([int]::TryParse($expireIn, [ref]$null)) {$expireDays = [int]$expireIn
-if ($expireDays -le 0) {$expireDays = 365}
+if ($expireDays -gt 365) {$expireDays = 365}
+if ($expireDays -lt -365) {$expireDays = -365}
 $expires = (Get-Date).AddDays($expireDays).ToString("yyyy-MM-dd")}
-else {$expires = $entry.Expires}
+else {$expires = $entry.data.Expires}
 
-# Apply updated values
-$entry.Title = if ($title) {$title} else {$entry.Title}
-$entry.Username = if ($username) {$username} else {$entry.Username}
-$entry.Password = $secure
-$entry.URL = if ($url) {$url} else {$entry.URL}
-$entry.Tags = if ($tags) {($tags -split ',') | ForEach-Object {$_.Trim()} | Where-Object {$_} | Join-String -Separator ', '} else {$entry.Tags}
-$entry.Notes = if ($notesIn) {$notesIn} else {$entry.Notes}
-$entry.Expires = $expires
+# Validate HMAC.
+if (-not (verifyentryhmac $entry)) {$script:warning = "❌ Entry '$($entry.data.Title)' failed HMAC validation. Tampering suspected. Aborted."; nomessage; rendermenu; return}
+
+# Apply updated values.
+$data = $entry.Data
+
+$data.Title = if ($title) {$title} else {$data.Title}
+$data.Username = if ($username) {$username} else {$data.Username}
+$data.Password = $secure
+$data.URL = if ($url) {$url} else {$data.URL}
+$data.Tags = if ($tags) {($tags -split ',') | ForEach-Object {$_.Trim()} | Where-Object {$_} | Join-String -Separator ', '} else {$data.Tags}
+$data.Notes = if ($notesIn) {$notesIn -replace '[^\u0009\u000A\u000D\u0020-\u007E]', ''} else {$data.Notes -replace '[^\u0009\u000A\u000D\u0020-\u007E]', ''}
+$data.Expires = $expires
+
+# Handle password history.
 $updatedtoday = Get-Date -Format "yyyy-MM-dd"
-if($passwordhistory -match "[Yy]") {if (-not [string]::IsNullOrWhiteSpace($entry.Notes)) {$entry.Notes = $entry.Notes.TrimEnd(); $entry.Notes += "`n------------------------------------`n"}
-$entry.Notes = $entry.Notes += "[OLD PASSWORD] $passwordplain (valid from $($entry.Created) to $updatedtoday)"}
-$entry.Created = $updatedtoday
+if ($passwordhistory -match "[Yy]") {if (-not [string]::IsNullOrWhiteSpace($data.Notes)) {$data.Notes = $data.Notes.TrimEnd(); $data.Notes += "`n------------------------------------`n"}
+$data.Notes += "[OLD PASSWORD] $passwordplain (valid from $($data.Created) to $updatedtoday)"}
 
-# Save and confirm
-$script:jsondatabase = $database
-$script:message = "`n✅ Entry successfully updated."; nowarning; savetodisk; rendermenu}
+$data.Created = $updatedtoday
+
+# Recompute and update HMAC.
+$entry.HMAC = createperentryhmac $data $script:key
+
+# Save and confirm.
+$script:jsondatabase = $database; $script:message = "`n✅ Entry successfully updated."; nowarning; savetodisk; rendermenu}
 
 function removeentry ($searchterm) {# Remove an entry.
 
 # Error-checking.
-if (-not $script:jsondatabase) {$script:warning = "No database loaded."; nomessage; return}
+if (-not $script:jsondatabase) {$script:warning = "📑 No database loaded."; nomessage; return}
 if ($searchterm.Length -lt 3) {$script:warning = "Search term too short. Aborting removal."; nomessage; return}
 
-$matches = $script:jsondatabase | Where-Object {$_.Title -match $searchterm -or $_.Username -match $searchterm -or $_.URL -match $searchterm -or $_.Tags -match $searchterm -or $_.Notes -match $searchterm}
+$matches = $script:jsondatabase | Where-Object {$_.Title -match $searchterm -or $_.data.Username -match $searchterm -or $_.data.URL -match $searchterm -or $_.data.Tags -match $searchterm -or $_.data.Notes -match $searchterm}
 $count = $matches.Count
 if ($count -eq 0) {$script:warning = "No entries found matching '$searchterm'."; nomessage; return}
 elseif ($count -gt 15) {$script:warning = "Too many matches ($count). Please refine your search."; nomessage; return}
@@ -553,49 +723,62 @@ if ([int]::TryParse($choice, $refParsedChoice) -and $refParsedChoice.Value -ge 1
 else {$invalidentry = "`nInvalid entry. Try again."}}
 while ($true)}
 
-# Confirm deletion
-Write-Host -f cyan "`nYou selected:`n"
-Write-Host -f yellow "📜 Title: " -n; Write-Host -f white "$($selected.Title)"
-Write-Host -f yellow "🆔 User:  " -n; Write-Host -f white "$($selected.Username)"
-Write-Host -f yellow "🔗 URL:   " -n; Write-Host -f white "$($selected.URL)"
-Write-Host -f yellow "🏷  Tags:  " -n; Write-Host -f white "$($selected.Tags)"
-Write-Host -f yellow "📝 Notes: " -n; Write-Host -f white "$($selected.Notes)"
+# Notify about HMAC failure.
+$hmacValid = verifyentryhmac $selected
+if (-not $hmacValid) {Write-Host -f red "⚠️  Warning: This entry failed HMAC validation and may have been tampered with.`n"}
+
+# Confirm deletion.
+Write-Host -f red "🗓️ Created:   " -n; Write-Host -f white "$($selected.data.Created)"
+Write-Host -f red "⌛ Expires:   " -n; Write-Host -f white "$($selected.data.Expires)"
+Write-Host -f red "📜 Title:     " -n; Write-Host -f white "$($selected.data.Title)"
+Write-Host -f red "🆔 UserName:  " -n; Write-Host -f white "$($selected.data.Username)"
+Write-Host -f red "🔗 URL:       " -n; Write-Host -f white "$($selected.data.URL)"
+Write-Host -f red "🏷  Tags:      " -n; Write-Host -f white "$($selected.data.Tags)"
+Write-Host -f white "------------------------------------"
+Write-Host -f red "📝 Notes:`n"; Write-Host -f white "$($selected.data.Notes)"
 Write-Host -f cyan "`nType 'YES' to confirm removal: " -n; $confirm = Read-Host
 if ($confirm -ne "YES") {$script:warning = "Removal aborted."; nomessage; return}
 
 # Remove entry from in-memory database and save to disk.
-$script:jsondatabase = $script:jsondatabase | Where-Object {$_ -ne $selected}; savetodisk}
+$script:jsondatabase = @($script:jsondatabase | Where-Object {$_ -ne $selected}); savetodisk}
 
 function newkey ($keyfile) {# Create an AES key, protected with a master password.
 if (-not $keyfile) {$script:warning = "No key file identified."; nomessage}
 
-# Generate AES key
-$aesKey = New-Object byte[] 32; [Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($aesKey)
+# Generate random 32-byte AES key
+$aesKey = New-Object byte[] 32; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($aesKey)
 
 # Prepend magic marker "SCHV"
-$marker = [System.Text.Encoding]::UTF8.GetBytes("SCHV"); $keyWithMarker = $marker + $aesKey
-
-$keyfile = Join-Path $script:keydir $keyfile
+$marker = [System.Text.Encoding]::UTF8.GetBytes("SCHV"); $keyWithMarker = $marker + $aesKey; $keyfile = Join-Path $script:keydir $keyfile
 if (Test-Path $keyfile) {$script:warning = "That key file already exists."; nomessage; rendermenu; return}
 
-neuralizer; Write-Host -f yellow "🔐 Enter a master password to protect your key:" -n; $secureMaster = Read-Host -AsSecureString; $master = [System.Net.NetworkCredential]::new("", $secureMaster).Password
+neuralizer; Write-Host -f yellow "🔐 Enter a master password to protect your key: " -n; $secureMaster = Read-Host -AsSecureString; $master = [System.Net.NetworkCredential]::new("", $secureMaster).Password
+if ($master -notmatch '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).{8,}$') {$script:warning = "Password must be at least 8 characters long and include upper-case and lower-case letters, digits and symbols."; rendermenu; return}
 
-# Generate salt and derive key using PBKDF2
-$salt = New-Object byte[] 16; [Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($salt); $pbkdf2 = New-Object Security.Cryptography.Rfc2898DeriveBytes($master, $salt, 10000); $protectKey = $pbkdf2.GetBytes(32)
+# Generate random salt for PBKDF2
+$salt = New-Object byte[] 16; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($salt); 
 
-# Encrypt keyWithMarker using protectKey
-$aes = [Security.Cryptography.Aes]::Create(); $aes.Key = $protectKey; $aes.GenerateIV(); $iv = $aes.IV; $encryptor = $aes.CreateEncryptor(); $encryptedKey = $encryptor.TransformFinalBlock($keyWithMarker, 0, $keyWithMarker.Length)
+# Derive 64-byte key from master password + salt using your derivekeyfrompassword function
+$protectKey = derivekeyfrompassword $master $salt
 
-# Store salt + IV + ciphertext
-$output = [byte[]]($salt + $iv + $encryptedKey); [IO.File]::WriteAllBytes("$keyfile", $output); $script:message = "Encrypted AES key created."; $script:keyfile = $keyfile; $script:keyexists = $true; $script:disablelogging = $false; nowarning}
+# Encrypt + authenticate the AES key + marker using your protectbytesaeshmac function
+$encryptedKey = protectbytesaeshmac $keyWithMarker $protectKey
 
-function validatedatabase {# Validate an database.
+# Save salt + full encrypted blob (HMAC + IV + ciphertext)
+$output = $salt + $encryptedKey; [IO.File]::WriteAllBytes($keyfile, $output); $script:message = "Encrypted AES key created."
+
+# Optional: initialize privilege rotation support
+Write-Host -f yellow "`nEnable master password rotation support? (Y/N): " -n; $choice = Read-Host
+if ($choice -match '^[Yy]') {try {initializeprivilege -Key $aesKey -Master $master}
+catch {$script:warning = "Key created, but failed to initialize rotation support: $_"; return}}
+$script:keyfile = $keyfile; $script:keyexists = $true; $script:disablelogging = $false; nowarning}
+
+function validatedatabase {# Validate a database.
 Write-Host -f cyan "`n`n✅ Provide full path of PWDB file to validate: " -n; $filepath = Read-Host
 if ($filepath.Length -lt 1) {$script:warning = "Aborted."; nomessage; rendermenu}
 elseif (-not (Test-Path $filepath)) {$script:warning = "File not found: $filepath"; nomessage; rendermenu; return}
 
-$script:database = $filepath
-Write-Host -f cyan "`n🔑 Provide full path to the KEY file: " -n; $keypath = Read-Host
+$script:database = $filepath; Write-Host -f cyan "`n🔑 Provide full path to the KEY file: " -n; $keypath = Read-Host
 if (-not (Test-Path $keypath)) {$script:warning = "Key file not found: $keypath"; nomessage; rendermenu; return}
 
 try {decryptkey $keypath
@@ -605,18 +788,21 @@ $script:keyfile = $keypath; $script:jsondatabase = $null; $script:jsondatabase =
 if (-not $script:jsondatabase) {$script:warning = "Decryption produced no data."; nomessage; rendermenu; return}
 elseif (-not ($script:jsondatabase -is [System.Collections.IEnumerable])) {$script:warning = "Decrypted data is not an array."; nomessage; rendermenu; return}
 
-$badEntries = @(); $i = 0
-foreach ($entry in $script:jsondatabase) {$i++
-if (-not ($entry.PSObject.Properties.Name -contains 'Title' -and $entry.PSObject.Properties.Name -contains 'Password' -and $entry.PSObject.Properties.Name -contains 'URL')) {$badEntries += [PSCustomObject]@{Index=$i; Content=$entry; Reason="Missing required fields."}}}
+$badEntries = @(); $i = 0; $script:warning = $null
+foreach ($entry in $script:jsondatabase) {$i++; $missingFields = @()
+foreach ($field in 'Title','Password','URL') {if (-not ($entry.PSObject.Properties.Name -contains $field)) {$missingFields += $field}}
+if ($missingFields.Count -gt 0) {$badEntries += [PSCustomObject]@{Index = $i; Content = $entry; Reason  = "Missing required field(s): $($missingFields -join ', ')"}
+continue}
+if (-not (verifyentryhmac $entry)) {$badEntries += [PSCustomObject]@{Index = $i; Content = $entry; Reason  = "Failed HMAC validation."}}}
 
-if ($badEntries.Count -gt 0) {Write-Host -f red "`nSome entries are malformed:`n"; $badEntries | Format-Table -AutoSize; Write-Host -f yellow "`n↩️ Return " -n; Read-Host; rendermenu}
-else {$script:message = "✔ All entries are valid."; nowarning; rendermenu}}
+if ($badEntries.Count -gt 0) {Write-Host -f red "`nSome entries are malformed or failed HMAC verification:`n"; $badEntries | Format-Table -AutoSize; Write-Host -f yellow "`n↩️ Return " -n; Read-Host; rendermenu}
+else {$script:message = "✔  All entries are valid."; nowarning; rendermenu}}
 catch {$script:warning = "❌ Verification failed:`n$($_.Exception.Message)"; nomessage; rendermenu}}
 
 function importcsv ($csvpath) {# Import a CSV file into the database.
 
 # Decrypt the key first.
-$key = decryptkey $script:keyfile
+$script:key = $null; decryptkey $script:keyfile
 if (-not $script:key) {$script:warning = "Key decryption failed. Aborting import."; nomessage; return}
 
 # Ensure the database is initialized. This is needed for new, empty databases.
@@ -632,7 +818,8 @@ if ($alreadyencrypted -match "[Nn]") {Write-Host -f red "Imported passwords must
 # Set expiry expectations.
 Write-Host -f yellow "`n⏳ How many days before these entries should expire? (Default = 365): " -n; $expireInput = Read-Host; $expireDays = 365
 if ([int]::TryParse($expireInput, [ref]$null)) {$expireDays = [int]$expireInput
-if ($expireDays -le 0) {$expireDays = 365}}
+if ($expireDays -gt 365) {$expireDays = 365}
+if ($expireDays -lt -365) {$expireDays = -365}}
 $expires = (Get-Date).AddDays($expireDays).ToString("yyyy-MM-dd")
 
 # Detect extra fields not accounted for already.
@@ -661,24 +848,24 @@ $url = if ($entry.URL -is [string] -and $entry.URL.Trim()) {$entry.URL.Trim()} e
 $notes = if ($entry.Notes) {$entry.Notes.Trim()} else {""}
 $tags = if ($entry.Tags) {$entry.Tags.Trim()} else {""}
 
-# Validate non-empty Username and URL
+# Validate non-empty Username and URL.
 if ([string]::IsNullOrWhiteSpace($username)) {Write-Host -f Cyan "`nUsername is empty for an entry (Title: '$title', URL: '$url'). Enter a Username or press Enter to skip: " -n; $username = Read-Host
 if ([string]::IsNullOrWhiteSpace($username)) {Write-Host -f Yellow "Skipping entry due to empty Username."; $skipped++; continue}}
 
 if ([string]::IsNullOrWhiteSpace($url)) {Write-Host -f Cyan "`nURL is empty for an entry (Title: '$title', Username: '$username'). Enter a URL or press Enter to skip: " -n; $url = Read-Host
 if ([string]::IsNullOrWhiteSpace($url)) {Write-Host -f Yellow "Skipping entry due to empty URL."; $skipped++; continue}}
 
-# Auto-fill Title from domain if empty
+# Auto-fill Title from domain if empty.
 if ([string]::IsNullOrWhiteSpace($title)) {$domain = if ($url -match '(?i)^(https?:\/\/)?(www\.)?(([a-z\d-]+\.)*[a-z\d-]+\.[a-z]{2,10})(\W|$)') {$matches[3].ToLower()} else {""}
 if ([string]::IsNullOrWhiteSpace($domain)) {Write-Host -f Cyan "`nTitle is missing and could not auto-extract from URL: $url. Please enter a Title or press Enter to skip: " -n; $title = Read-Host
 if ([string]::IsNullOrWhiteSpace($title)) {Write-Host -f Yellow "Skipping entry due to missing Title."; $skipped++; continue}}
 else {$title = $domain; Write-Host -f Yellow "Title auto-set to domain: $title"}}
 
-# Append extra fields to Notes if requested
+# Append extra fields to Notes if requested.
 foreach ($field in $extraFields) {if ($entry.PSObject.Properties.Name -contains $field) {$val = $entry.$field
 if (-not [string]::IsNullOrWhiteSpace($val) -and $fieldAppendNotes[$field]) {$notes += "`n$field`: $val"}}}
 
-# Add tags for extra fields
+# Add tags for extra fields.
 foreach ($field in $extraFields) {if ($fieldTagMode[$field] -ne 'none' -and $entry.PSObject.Properties.Name -contains $field) {$val = $entry.$field; $shouldAdd = $false
 switch ($fieldTagMode[$field]) {'a' {$shouldAdd = $true}
 'p' {$shouldAdd = -not [string]::IsNullOrWhiteSpace($val)}}
@@ -686,32 +873,47 @@ if ($shouldAdd) {$existingTags = $tags -split ',\s*' | Where-Object {$_ -ne ''}
 if (-not ($existingTags -contains $field)) {$tags = if ([string]::IsNullOrWhiteSpace($tags)) {$field} else {"$tags,$field"}
 $tagAddCounts[$field]++}}}}
 
-# Check duplicates by Username and URL
-$match = $script:jsondatabase | Where-Object {$_.Username -eq $username -and $_.URL -eq $url}
-if ($match) {$duplicates++
+# Check duplicates by Username and URL.
+$matches = $script:jsondatabase | Where-Object {$_.Data.Username -eq $username -and $_.Data.URL -eq $url}
+
+if ($matches.Count -gt 0) {$validMatches = $matches | Where-Object {verifyentryhmac $_}
+$invalidMatches = $matches | Where-Object {-not (verifyentryhmac $_)}
+
+if ($validMatches.Count -eq 0) {Write-Host -f Red "❌ All duplicate entries for 🆔 '$username' at 🔗 '$url' failed HMAC validation. Possible tampering suspected. Skipping duplicate handling."; continue}
+
+# Proceed with first valid duplicate for the prompt
+$match = $validMatches[0]; $duplicates++
 Write-Host -f Yellow "`nDuplicate detected for 🆔 '$username' at 🔗 '$url'"
-Write-Host -f Cyan "📜 Title: $($match.Title) => $title"
-Write-Host -f Cyan "🏷️  Tags: $($match.Tags) => $tags"
-Write-Host -f Cyan "📝 Notes: $($match.Notes) => $notes"
-Write-Host -f White "`nOptions: (S)kip / (O)verwrite / (K)eep both [default: Keep]: " -n
-$choice = Read-Host
-switch ($choice.ToUpper()) {"O" {$script:jsondatabase = $script:jsondatabase | Where-Object {$_ -ne $match}
-Write-Host -f Red "`nOverwritten."; $overwritten++}
+Write-Host -f Cyan "📜 Title: $($match.Data.Title) => $title"
+Write-Host -f Cyan "🏷️  Tags: $($match.Data.Tags) => $tags"
+Write-Host -f Cyan "📝 Notes: $($match.Data.Notes) => $notes"
+Write-Host -f White "`nOptions: (S)kip / (O)verwrite / (K)eep both [default: Keep]: " -n; $choice = Read-Host
+switch ($choice.ToUpper()) {"O" {$script:jsondatabase = $script:jsondatabase | Where-Object {$_ -ne $match}; Write-Host -f Red "`nOverwritten."; $overwritten++}
 "S" {Write-Host -f Red "`nSkipping entry."; $skipped++; continue}
 "K" {Write-Host -f Green "`nKeeping both."}
 default {Write-Host -f Green "`nKeeping both."}}}
 
-# Encrypt password using encryptpassword function; allow empty password
+# Encrypt password using encryptpassword function; allow empty password.
 if ($alreadyencrypted -match "[Yy]") {$encryptedPassword = $plainpassword}
 else {if ([string]::IsNullOrWhiteSpace($plainpassword)) {Write-Host -f Yellow "`nEntry for 🆔 '$username' at 🔗 '$url' has no password. Adding with 🚫 empty password."; $plainpassword = ""}
 $encryptedPassword = encryptpassword $plainpassword}
 
 # Create new entry and add to in-memory database and then save to disk.
-$newEntry = [PSCustomObject]@{Title = $title; Username = $username; Password = $encryptedPassword; URL = $url; Tags = $tags; Notes = $notes; Created = (Get-Date).ToString("yyyy-MM-dd"); Expires = $expires}
+$data = [PSCustomObject]@{Title = $title
+Username = $username
+Password = $encryptedPassword
+URL = $url
+Tags = $tags
+Notes = $notes
+Created = (Get-Date).ToString("yyyy-MM-dd")
+Expires = $expires}
+$hmac = createperentryhmac $data $script:key
+$newEntry = [PSCustomObject]@{Data = $data; HMAC = $hmac}
+
 $script:jsondatabase += $newEntry; $added++}
 savetodisk
 
-# Summary output
+# Summarize output.
 Write-Host -f Green "`n✅ Import complete.`n"
 Write-Host -f Yellow "New entries added:" -n; Write-Host -f White " $added"
 Write-Host -f Gray "Duplicates skipped:" -n; Write-Host -f White " $skipped"
@@ -720,19 +922,68 @@ Write-Host -f Yellow "Total duplicates:" -n; Write-Host -f White " $duplicates"
 $tagsAdded = ($tagAddCounts.GetEnumerator() | Where-Object {$_.Value -gt 0})
 if ($tagsAdded.Count -gt 0) {Write-Host -f Yellow "Tag types added:" -n; Write-Host -f White " $($tagsAdded.Count)"
 Write-Host -f Yellow "Tags added:" -n; Write-Host -f White " $($tagsAdded.Name -join ', ')"}
+
+# Offer secure delete of CSV file after import.
+Write-Host -f red "`n⚠️  Do you want to securely erase the imported CSV file from disk? (Y/N) " -n; $wipecsv = Read-Host
+if ($wipecsv -match '^[Yy]') {try {$passes = Get-Random -Minimum 3 -Maximum 50; $length = (Get-Item $csvpath).Length
+for ($i = 0; $i -lt $passes; $i++) {$junk = New-Object byte[] $length; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($junk); [System.IO.File]::WriteAllBytes($csvpath, $junk)}
+Remove-Item $csvpath -Force
+Write-Host -f white "`n🧨 CSV file wiped and deleted in $passes passes."}
+catch {Write-Host -f Red "❌ Failed to securely wipe CSV file: $_"}}
+
 Write-Host -f Cyan "`n↩️Return" -n; Read-Host}
 
 function saveandsort {# Sort the database by tag, then by title.
-$script:jsondatabase = $script:jsondatabase | Sort-Object {($_.Tags -join ' ').ToLower()}, {$_.Title.ToLower()}; savetodisk}
+$script:jsondatabase = $script:jsondatabase | Sort-Object {($_.data.Tags -join ' ').ToLower()}, {$_.data.Title.ToLower()}; savetodisk}
 
 function sometestfunction {# Various testing functions via F10
-# Create a bogus entry to test the validate function.
-# $entry = [PSCustomObject]@{Title = "Batman"}; $script:jsondatabase += $entry; savetodisk
-
-# Note to self: the following keys are not yet mapped via the main menu: f g j n w y 4-9 0
+# Note to self: the following keys are not yet mapped via the main menu: g j w y 4-9 0
 }
 
-#---------------------------------------------END SECURE FILE MANAGEMENT FUNCTIONS-----------------
+#---------------------------------------------HOUSE CLEANING FUNCTIONS-----------------------------
+
+function corruptdatabase {# JSON Database overwriting.
+$databasepasscount = Get-Random -Minimum 3 -Maximum 10;
+if (-not ($script:jsondatabase -and $script:jsondatabase.Count -gt 0)) {return}
+for ($i = 0; $i -lt $databasepasscount; $i++) {foreach ($entry in $script:jsondatabase) {foreach ($property in $entry.PSObject.Properties) {$original = "$($property.Value)"
+if ([string]::IsNullOrEmpty($original)) {continue}
+$originalLength = $original.Length; $multiplier = Get-Random -Minimum 1.1 -Maximum 3.9; $roundingMethod = Get-Random -InputObject 'Floor','Ceiling','Round'; $targetLength = [Math]::$roundingMethod($originalLength * $multiplier); $junkBytes = New-Object byte[] $targetLength; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($junkBytes); $trimmed = $junkBytes[0..($originalLength - 1)]; $asciiJunk = ($trimmed | ForEach-Object {[char](($_ % 94) + 33)}) -join ''; $property.Value = $asciiJunk}}}; $script:jsondatabase = $null}
+
+function wipe ([ref]$data) {# Byte variable overwriting and wiping.
+if ($data.Value -is [byte[]] -and $data.Value.Length -gt 0) {$length = $data.Value.Length
+for ($i = 0; $i -lt $script:keypasscount; $i++) {$multiplier = Get-Random -Minimum 1.1 -Maximum 3.9; $roundingMethod = Get-Random -InputObject 'Floor','Ceiling','Round'; $targetLength = [Math]::$roundingMethod($length * $multiplier); $junk = New-Object byte[] $targetLength; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($junk); [Array]::Copy($junk, 0, $data.Value, 0, $length)}
+$data.Value = $null}
+elseif ($data.Value -is [SecureString]) {$bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($data.Value); [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr); $data.Value = $null}}
+
+function scramble ([ref]$reference) {# String overwriting.
+if ([string]::IsNullOrEmpty($reference.Value)) {return}
+$length = $reference.Value.Length
+for ($i = 0; $i -lt $script:keypasscount; $i++) {$multiplier = Get-Random -Minimum 1.1 -Maximum 3.9; $roundingMethod = Get-Random -InputObject 'Floor','Ceiling','Round'
+$targetLength = [Math]::$roundingMethod($length * $multiplier); $junk = -join ((33..126) | Get-Random -Count $targetLength | ForEach-Object {[char]$_}); $reference.Value = $junk}
+$reference.Value = $null; [GC]::Collect(); [GC]::WaitForPendingFinalizers()}
+
+function neuralizer {# Wipe key and database from memory.
+$script:unlocked = $false; $choice = $null; $script:timetoboot = Get-Date
+
+if ($script:noclip -eq $false) {clearclipboard 0 64}
+
+$stopwatch_corrupt = [System.Diagnostics.Stopwatch]::StartNew()
+corruptdatabase
+$stopwatch_corrupt.Stop()
+
+$wipearray = @($aeskey, $bytes, $bytes1, $bytes2, $cipherbytes, $ciphertext, $compressedbytes, $decrypted, $decryptedbytes, $decryptedkey, $derivedkey, $enc, $enckey, $encryptedbytes, $encryptedkey, $entries, $entry, $entrymatches, $filtered, $finalbytes, $hash, $hmacbytes, $hmacdata, $hmackey, $imported, $iv, $jsonbytes, $key, $keywithmarker, $marker, $matches, $newentry, $newwrapkey, $newwrapsalt, $output, $pass, $password, $plain, $plainbytes, $plainpwd, $plaintext, $protectedbytes, $protectkey, $raw, $refparsedchoice, $rootkey, $salt, $script:key, $secure, $secure1, $secure2, $securemaster, $str1, $str2, $verifkey, $verifsalt, $wrapkey, $wrapsalt)
+$stopwatch_wipe = [System.Diagnostics.Stopwatch]::StartNew()
+foreach ($item in $wipearray) {if ($item) {wipe ([ref]$item)}}
+$stopwatch_wipe.Stop()
+
+$scramblearray = @($chars, $computedhash, $coreparts, $encroot, $encryptedpassword, $existing, $expected, $gen, $getdatabase, $getkey, $input, $invalidentry, $joined, $json, $jsontext, $keep, $key, $master, $newpwd, $newpwd2, $oldpwd, $passplain, $passwordhistory, $passwordplain, $plainpassword, $plaintext, $pwchars, $result, $selected.password, $selected.username, $storedhash, $updatepass, $username, $value, $wipecsv)
+$stopwatch_scramble = [System.Diagnostics.Stopwatch]::StartNew()
+foreach ($item in $scramblearray) {if ($item) {scramble ([ref]$item)}}
+$stopwatch_scramble.Stop()
+
+if ($script:quit) {scramble ([ref]$script:message); scramble ([ref]$script:warning); $securymemorytime = ([math]::Round($stopwatch_wipe.Elapsed.TotalSeconds, 2)) + ([math]::Round($stopwatch_scramble.Elapsed.TotalSeconds, 2)) + ([math]::Round($stopwatch_corrupt.Elapsed.TotalSeconds, 2)); $script:message += "Clearing the database and memory artifacts took $securymemorytime seconds."}}
+
+#---------------------------------------------END HOUSE CLEANING------------------------------------
 
 function backup {# Backup currently loaded key and database pair to the database directory.
 $script:message = $null; $script:warning = $null; $baseName = [System.IO.Path]::GetFileNameWithoutExtension($script:database); $timestamp = Get-Date -Format "MM-dd-yyyy @ HH_mm_ss"; $zipName = "$baseName ($timestamp).zip"; $zipPath = Join-Path $script:databasedir $zipName
@@ -1019,6 +1270,8 @@ elseif ($choice -eq 'K') {$script:emoji = "🗝  Select a key"}
 elseif ($choice -eq 'C') {$script:emoji = "🔑 Create a key"}
 elseif ($choice -eq 'D') {$script:emoji = "📑 Select a database"}
 elseif ($choice -eq 'P') {$script:emoji = "📄 Create a database"}
+elseif ($choice -eq 'N') {$script:emoji = "👑 New master password"}
+elseif ($choice -eq 'F') {$script:emoji = "👑 [F]ull DB export"}
 elseif ($choice -eq 'V') {$script:emoji = "✅ Verify a database"}
 elseif ($choice -eq 'I') {$script:emoji = "📥 Import from CSV"}
 elseif ($choice -eq 'OEMMINUS') {$script:emoji = "📤 Export to CSV"}
@@ -1131,7 +1384,7 @@ startline; Write-Host -f cyan " R. " -n; Write-Host -f white "🔓 [R]etrieve an
 startline; Write-Host -f cyan " X. " -n; Write-Host -f red "❌ Remove an entry.".padright(41) -n; if($script:disablelogging){Write-Host -f red "Logging is disabled. 🔴 " -n} else {Write-Host -f green "Logging is enabled.  🟢 " -n};linecap
 horizontal
 startline; Write-Host -f cyan " B. " -n; Write-Host -f white "🧐 [B]rowse all entries: " -n; Write-Host -f cyan "$(($script:jsondatabase).Count)".padright(41) -n; linecap
-$now = Get-Date; $expiredcount = ($script:jsondatabase | Where-Object {$_.Expires -and ($_."Expires" -as [datetime]) -le $now}).Count
+$today = Get-Date; $expiredcount = ($script:jsondatabase | Where-Object {$_.data.Expires -and ($_.data."Expires" -as [datetime]) -le $today}).Count
 startline; Write-Host -f cyan " E. " -n; Write-Host -f white "⌛ [E]xpired entries view: " -n; if ($expiredcount -eq 0) {Write-Host -f green "0".padright(39) -n} else {Write-Host -f red "$expiredcount".padright(39) -n}; linecap
 startline; Write-Host -f cyan " S. " -n; Write-Host -f white "🔍 [S]earch entries for specific keywords.".padright(66) -n; linecap
 startline; Write-Host -f cyan "   1. " -n; Write-Host -f white "🖥  [1] Find IPs.".padright(65) -n; linecap
@@ -1147,10 +1400,14 @@ horizontal
 startline; Write-Host -f cyan " D. " -n; Write-Host -f white "📑 Select a different password [D]atabase.".padright(66) -n; linecap
 startline; Write-Host -f cyan " P. " -n; Write-Host -f yellow "📄 Create a new [P]assword database.".padright(66) -n; linecap
 horizontal
+startline; Write-Host -f cyan " N. " -n; Write-Host -f white "👑 [N]ew master password.".padright(66) -n; linecap
+horizontal
 startline;  Write-Host -f cyan " V. " -n; Write-Host -f white "✅ [V]alidate a PWDB file.".padright(65) -n; linecap
 horizontal
 startline; Write-Host -f cyan " I. " -n; Write-Host -f yellow "📥 [I]mport a CSV plaintext password database.".padright(66) -n; linecap
-startline; Write-Host -f cyan " -  " -n; Write-Host -f white "📤 Export the current database to CSV. " -n; Write-Host -f red "Encryption remains intact. " -n; linecap
+startline; Write-Host -f cyan " -  " -n; Write-Host -f white "📤 Export the current database to CSV. " -n; Write-Host -f green "Encryption remains intact. " -n; linecap
+startline; Write-Host -f cyan " F. " -n; Write-Host -f white "📂 [F]ull DB export with " -n; Write-Host -f red "unencrypted" -n; Write-Host -f white " passwords.".padright(30) -n; linecap
+
 horizontal
 startline; Write-Host -f cyan " <  " -n; Write-Host -f white "📦←︎ Backup currently loaded database and key.".padright(67) -n; linecap
 startline; Write-Host -f cyan " >  " -n; Write-Host -f yellow "📦→︎ Restore a backup.".padright(67) -n; linecap
@@ -1184,14 +1441,13 @@ if ($message) {$logmessage = ($message -replace '🔐 Password:.*', '🔐 Passwo
 $map = @{'A' = 'Add an entry'; 'R' = 'Retrieve an entry'; 'X' = 'Remove an entry'; 'B' = 'Browse entries'; 'E' = 'View expired entries'; 'S' = 'Search entries'; 'L' = 'Lock'; 'U' = 'Unlock'; 'T' = 'Reset timer'; 'O' = 'Restore Default Key & Database'; 'Z' = 'Toggle Clipboard'; 'M' = 'Toggle management view'; 'K' = 'Select a key'; 'C' = 'Create a key'; 'D' = 'Select a database'; 'P' = 'Create a database'; 'V' = 'Verify a PWDB'; 'I' = 'Import a CSV'; 'OEMMINUS' = 'Export to CSV'; 'SUBTRACT' = 'Export to CSV'; 'OEMPERIOD' = 'Backup key and database'; 'OEMCOMMA' = 'Restore a key and database'; 'Q' = 'Quit'; 'H' = 'Help'; 'F1' = 'Help'; 'F4' = 'Toggle logging'; 'BACKSPACE' = 'Clear message center'; 'D1' = 'Find IPs'; 'D2' = 'Find invalid URLs'; 'D3' = 'Find valid URLs'; 'F9' = 'Display configuration information'; 'F10' = 'Development testing function'}
 
 # Create directory, if it doesn't exist.
-$script:logdir = Join-Path $PSScriptRoot 'logs'
-if (-not (Test-Path $logdir)) {New-Item $logdir -ItemType Directory -Force | Out-Null}
+if (-not (Test-Path $script:logdir)) {New-Item $script:logdir -ItemType Directory -Force | Out-Null}
 
 # Cleanup old logs (older than the number of days set in logretention, with the minimum set to 30 days).
-Get-ChildItem -Path $logdir -Filter 'log - *.log' | Where-Object {$_.LastWriteTime -lt (Get-Date).AddDays(-[int]$script:logretention)} | Remove-Item -Force
+Get-ChildItem -Path $script:logdir -Filter 'log - *.log' | Where-Object {$_.LastWriteTime -lt (Get-Date).AddDays(-[int]$script:logretention)} | Remove-Item -Force
 
 # Create base file each session.
-if (-not $script:logfile) {$timestamp = (Get-Date).ToString('MM-dd-yy @ HH_mm_ss'); $script:logfile = Join-Path $logdir "log - $timestamp.log"}
+if (-not $script:logfile) {$timestamp = (Get-Date).ToString('MM-dd-yy @ HH_mm_ss'); $script:logfile = Join-Path $script:logdir "log - $timestamp.log"}
 
 # Map unknown keys.
 if (-not $map.ContainsKey($choice)) {Add-Content -Path $script:logfile -Value "$(Get-Date -Format 'HH:mm:ss') - UNRECOGNIZED: $choice"; return}
@@ -1209,8 +1465,8 @@ function logcleanup {# Compress log files.
 
 function gziplog ($inputFile, $outputFile = "$inputFile.gz") {$inputStream = [System.IO.File]::OpenRead($inputFile); $outputStream = [System.IO.File]::Create($outputFile); $gzipStream = New-Object System.IO.Compression.GZipStream($outputStream, [System.IO.Compression.CompressionMode]::Compress); $inputStream.CopyTo($gzipStream); $gzipStream.Close(); $inputStream.Close(); $outputStream.Close()}
 
-Get-ChildItem -Path $logdir -Filter 'log - *.log' | Where-Object {$_.Name -match '^log - (\d{2})-(\d{2})-(\d{2})' -and $_.Name -notmatch '^log - \d{2}-\d{2}-\d{2}\.log$'} | Group-Object {if ($_.Name -match '^log - (\d{2})-(\d{2})-(\d{2})') {$mm = $matches[1]; $dd = $matches[2]; $yy = $matches[3]; $fileDate = Get-Date "$mm-$dd-20$yy"
-if ($fileDate -lt $today) {"$mm-$dd-$yy"} else {$null}}} | Where-Object {$_.Name} | ForEach-Object {$date = $_.Name; $output = Join-Path $logdir "log - $date.log"; $_.Group | Sort-Object LastWriteTime | ForEach-Object {Get-Content $_.FullName | Add-Content -Path $output}
+$today = (Get-Date).Date; Get-ChildItem -Path $script:logdir -Filter 'log - *.log' | Where-Object {$_.Name -match '^log - (\d{2})-(\d{2})-(\d{2}) @'} | Group-Object {if ($_.Name -match '^log - (\d{2})-(\d{2})-(\d{2})') {$mm = $matches[1]; $dd = $matches[2]; $yy = $matches[3]; $fileDate = Get-Date "$mm-$dd-20$yy"
+if ($fileDate -lt $today) {"$mm-$dd-$yy"} else {$null}}} | Where-Object {$_.Name} | ForEach-Object {$date = $_.Name; $output = Join-Path $script:logdir "log - $date.log"; $_.Group | Sort-Object LastWriteTime | ForEach-Object {Get-Content $_.FullName | Add-Content -Path $output}
 $_.Group | ForEach-Object {Remove-Item $_.FullName -Force}
 gziplog $output; Remove-Item $output -Force}}
 
@@ -1230,7 +1486,6 @@ $script:sessionstart = Get-Date; $choice = $null
 loadjson
 rendermenu
 scheduledbackup
-logcleanup
 
 do {# Wait for a keypress, in order to refresh the screen.
 while (-not [Console]::KeyAvailable -and -not $script:quit) {
@@ -1283,56 +1538,59 @@ rendermenu}
 
 'X' {# Remove an entry.
 limitedaccess; if ($standarduser) {break}
-Write-Host -f green "`n`n❌ Enter Title, Username, URL, Tag or Note to identify entry: " -n; $searchterm = Read-Host; removeentry $searchterm; rendermenu}
+Write-Host -f red "`n`n❌ Enter Title, Username, URL, Tag or Note to identify entry: " -n; $searchterm = Read-Host; removeentry $searchterm; rendermenu}
 
 'B' {# Browse all entries from memory.
 if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No valid entries loaded in memory to display."; nomessage}
 else {showentries $script:jsondatabase; nomessage; nowarning}}
 
 'E' {# Retrieve expired entries.
-if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No database loaded."; nomessage; rendermenu}
+if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "📑 No database loaded."; nomessage; rendermenu}
 
-$expiredEntries = $script:jsondatabase | Where-Object {try {[datetime]::Parse($_.expires) -lt (Get-Date) <#-or [datetime]::Parse($_.created) -lt (Get-Date).AddDays(-$script:expirywarning)#>}
+$expiredEntries = $script:jsondatabase | Where-Object {try {[datetime]::Parse($_.data.expires) -le (Get-Date)}
 catch {$false}}
 
-if (-not $expiredEntries.Count) {$script:warning = "No expired entries found."; nomessage; rendermenu}
-else {showentries $expiredEntries}; nomessage; nowarning}
+if (-not $expiredEntries.Count) {$script:warning = "No expired entries found."}
+else {showentries $expiredEntries -expired; nowarning}; nomessage; rendermenu}
 
 'S' {# Search for keyword matches.
-if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No database loaded."; nomessage; rendermenu}
+if (-not $script:jsondatabase -or $script:jsondatabase.Count -eq 0) {$script:warning = "📑 No database loaded."; nomessage; rendermenu; break}
 
 Write-Host -f yellow "`n`nProvide a comma separated list of keywords to find: " -n; $keywords = Read-Host
 
-# Split keywords, trim and to lowercase for case-insensitive matching
-$keywordList = $keywords.Split(',') | ForEach-Object {$_.Trim().ToLower()}
-
-$matchedEntries = $script:jsondatabase | Where-Object {$text = ($_ | Out-String).ToLower()
-foreach ($k in $keywordList) {if ($text -match [regex]::Escape($k)) {return $true}}
-return $false}
-
-if (-not $matchedEntries.Count) {$script:warning = "No matches found for provided keywords."; nomessage; rendermenu}
-
 if (-not $keywords -or $keywords.Trim().Length -eq 0) {$matchedEntries = $null; $script:warning = "No search terms provided."; nomessage; rendermenu}
 
-else {showentries $matchedEntries -search -keywords $keywords; nomessage; nowarning}}
+# Split keywords, trim and to lowercase for case-insensitive matching
+$pattern = "(?i)(" + ($keywords -replace "\s*,\s*", "|") + ")"; $matchcount = 0; $script:warning = $null
+foreach ($entry in $script:jsondatabase) {if ($entry.data.Title -match $pattern -or $entry.data.Username -match $pattern -or $entry.data.URL -match $pattern -or $entry.data.Tags -match $pattern -or $entry.data.Notes -match $pattern) {if (-not (verifyentryhmac $entry)) {$script:warning += "Entry $($entry.data.title) has an invalid HMAC and will be ignored. "; continue}
+$matchcount++; break}}
+
+if ($matchcount -eq 0) {$script:warning = "No matches found for provided keywords."; nomessage; rendermenu}
+
+else {showentries $script:jsondatabase -search -keywords "$pattern"; nomessage; nowarning}}
 
 'D1' {# Search for IP matches.
-if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No database loaded."; nomessage; rendermenu}
+if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "📑 No database loaded."; nomessage; rendermenu}
 else {showentries $script:jsondatabase -ips; nomessage; nowarning}}
 
 'D2' {# Search for invalid URLs.
-if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No database loaded."; nomessage; rendermenu}
+if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "📑 No database loaded."; nomessage; rendermenu}
 else {showentries $script:jsondatabase -invalidurls; nomessage; nowarning}}
 
 'D3' {# Search for valid URLs.
-if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "No database loaded."; nomessage; rendermenu}
+if (-not $script:jsondatabase -or -not $script:jsondatabase.Count) {$script:warning = "📑 No database loaded."; nomessage; rendermenu}
 else {showentries $script:jsondatabase -validurls; nomessage; nowarning}}
 
 'M' {# Toggle Management mode.
-limitedaccess; if ($standarduser) {break}
-if ($script:management -eq $true) {$script:management = $false}
-else {$script:management = $true}
-nowarning; nomessage; rendermenu}
+if ($script:management -eq $true) {$script:management = $false; nowarning; nomessage; rendermenu; break}
+
+limitedaccess; if ($standarduser) {rendermenu; break}
+if (masterlockout) {rendermenu; break}
+
+Write-Host -f green  "`n`n`t👑 Enter Master Password " -n; $master = Read-Host -AsSecureString
+if (-not (verifymasterpassword $master)) {$script:failedmaster ++; $script:warning = "Wrong master password. $([math]::Max(0,4 - $script:failedmaster)) attempts remain before lockout."}
+else {nowarning; $script:management = $true}
+nomessage; rendermenu; break}
 
 'K' {# Select a different password encryption key.
 managementisdisabled
@@ -1341,7 +1599,10 @@ if (-not $script:keyfiles) {$script:warning = "No .key files found."; nomessage;
 elseif ($script:keyfiles) {Write-Host -f white "`n`n🗝  Available AES Key Files:"; Write-Host -f yellow ("-" * 70)
 for ($i = 0; $i -lt $script:keyfiles.Count; $i++) {Write-Host -f cyan "$($i+1). " -n; Write-Host -f white $script:keyfiles[$i].Name}
 Write-Host -f green "`n🗝  Enter number of the key file to use: " -n; $sel = Read-Host
-if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $script:keyfiles.Count) {$script:keyfile = $script:keyfiles[$sel - 1].FullName; $script:keyexists = $true; nowarning; neuralizer; $key = decryptkey $script:keyfile; if ($script:keyfile -match '(?i)((\\[^\\]+){2}\\\w+\.KEY)') {$shortkey = $matches[1]} else {$shortkey = $script:keyfile} $script:message = "$shortkey selected and made active."; nowarning; $script:disablelogging = $false
+if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $script:keyfiles.Count) {$script:keyfile = $script:keyfiles[$sel - 1].FullName; $script:keyexists = $true; nowarning; neuralizer; decryptkey $script:keyfile
+if ($script:unlocked) {if ($script:keyfile -match '(?i)((\\[^\\]+){2}\\\w+\.KEY)') {$shortkey = $matches[1]}
+else {$shortkey = $script:keyfile}
+$script:message = "$shortkey selected and made active."; nowarning; $script:disablelogging = $false}
 if (-not $script:key) {$script:warning += " Key decryption failed. Aborting."; nomessage}}}; rendermenu}
 
 'C' {# Create a new password encryption key.
@@ -1369,9 +1630,19 @@ if ($getdatabase.length -lt 1) {$script:warning = "No filename entered."; nomess
 else {if (-not $getdatabase.EndsWith(".pwdb")) {$getdatabase += ".pwdb"}
 $path = Join-Path $script:databasedir $getdatabase
 if (Test-Path $path) {$script:warning = "File already exists. Choose a different name."; nomessage}
-else {$script:jsondatabase = $null; $script:jsondatabase = @(); decryptkey; $script:database = $Path
-#if (-not ($script:jsondatabase -is [System.Collections.IEnumerable])) {$script:jsondatabase = @()}
+else {$script:jsondatabase = $null; $script:jsondatabase = @(); decryptkey $script:keyfile; $script:database = $Path
 savetodisk; $script:message = "📄 New database $getdatabase created."; nowarning}; rendermenu}}
+
+'N' {# New master password.
+limitedaccess; if ($standarduser) {break}
+managementisdisabled
+if ($script:key) {rotatemasterpassword; rendermenu}}
+
+'F' {# Full db export.
+limitedaccess; if ($standarduser) {break}
+managementisdisabled
+if ($script:key) {fulldbexport; rendermenu}}
+
 
 'V' {# Verify a PWDB file.
 managementisdisabled
@@ -1450,13 +1721,13 @@ else {; logoff; while ([Console]::KeyAvailable) {return}; return}}
 
 'T' {# Set Timer.
 if (-not $script:keyfile -or -not $script:unlocked) {$script:warning = "You must have a key loaded and unlocked to reset its timer."; nomessage; rendermenu}
-else {""; $key = decryptkey $script:keyfile
+else {""; decryptkey $script:keyfile
 if (-not $script:unlocked) {neuralizer; rendermenu}
-if ($script:unlocked) {loadjson; Write-Host -f yellow "`nHow many minutes should the session remain unlocked? (1-99) " -n; $usersetminutes = Read-Host; if ($usersetminutes -as [int] -and [int]$usersetminutes -ge 1 -and [int]$usersetminutes -le 99) {$script:timeoutseconds = [int]$usersetminutes * 60; $script:sessionstart = Get-Date; while ([Console]::KeyAvailable) {[Console]::ReadKey($true) > $null}; $script:lastrefresh = 99; rendermenu}
+if ($script:unlocked) {loadjson; Write-Host -f yellow "`nHow many minutes should the session remain unlocked? (1-99) " -n; $usersetminutes = Read-Host; if ($usersetminutes -as [int] -and [int]$usersetminutes -ge 1 -and [int]$usersetminutes -le 99) {$script:timeoutseconds = [int]$usersetminutes * 60; $script:sessionstart = Get-Date; $script:lastrefresh = 99; rendermenu}
 else {$script:warning = "Invalid timer value set."; nomessage; rendermenu}}}}
 
 'O' {# Reload defaults.
-if (-not $script:database -or -not $script:keyfile) {$script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; ""; decryptkey $script:keyfile
+if (-not $script:database -or -not $script:keyfile) {$script:unlocked = $false; $script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; ""; decryptkey $script:keyfile
 if ($script:unlocked) {loadjson; $script:message += " Defaults successfully loaded and made active."; nowarning; rendermenu}
 else {$script:database = $null; $script:keyfile = $null; rendermenu}}}
 
@@ -1498,7 +1769,7 @@ $script:sessionstart = Get-Date
 $choice = $null}} while (-not $script:quit)}
 
 # Initialize and launch.
-initialize; setdefaults; resizewindow; login
+initialize; setdefaults; logcleanup; resizewindow; login
 if (-not $script:key -and (Test-Path $script:keyfile -ErrorAction SilentlyContinue)) {loginfailed} else {loggedin}}
 
 Export-ModuleMember -Function paschwords
@@ -1526,7 +1797,7 @@ There are also some hidden keys within the main menu:
 
 ## PSD1 Configuration
 
-You can view the current configuration with F9 and edit it with F10. These settings are all loaded from the accomanying PSD1 file:
+You can view the current configuration with F9 and edit it with F10. The Privlege directory however, where the Master hash and key are kept are not accessible through the in module configuration, for safety reasons. All other settings are all loaded from the accomanying PSD1 file:
 
 • The default database and key file names and their respective file paths make it easier to locate and switch databases, on the fly.
 
@@ -1545,6 +1816,8 @@ You can view the current configuration with F9 and edit it with F10. These setti
 • Log retention defaults to 30 days. This is also the minimum allowed, but there is no upper limit.
 
 • The default Common.dictionary file used for the built-in Paschword Generator can be replaced with any plaintext word list.
+
+• The useragent represents the value passed to the accompanying ValidateURLs.ps1, if utlized from within the valid URL export feature.
 ## Paschword Generator Modes
 When a new entry is added to the database, the user is presented with an option to use the built-in paschword generator, providing users with the ability to create paschwords which meet all typical security requirements, but also features several intelligent mechanisms to build  more useful and memorable paschwords.
 
