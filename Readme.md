@@ -1,9 +1,12 @@
 # Paschwords
-PowerShell module to manage your passwords. 
+A secure PowerShell module to manage and protect your passwords with industry-grade cryptography and integrity verification.
 
-    • The Key files use AES-256-CBC encryption, with a PBKDF2-derived key from the master paschword. A random IV is generated for each key file and prepended to the encrypted content.
-    • The paschword entries are encrypted using AES-256-CBC with a random IV. The ciphertext is also Base64-encoded for storage.
-    • The database files are serialized to JSON, compressed with GZIP, then prepended with the AES IV, encrypted using AES-256-CBC, and finally Base64-encoded.
+    • Master password protected by PBKDF2 hashing, separating authentication (password.hash) and encryption (root.key) material.
+    • Per-entry and per-database HMACs to ensure integrity and detect tampering at every level.
+    • AES-256-CBC encryption with unique random IVs for each key file, each password entry, and the entire database.
+    • Database storage serialized to JSON, compressed with GZIP, then encrypted and Base64-encoded for compactness and security.
+    • Encrypted password entries and key files use Base64 encoding for safe storage and easy interoperability.
+    • Designed for zero-trust handling — keys and secrets are carefully wiped or scrambled in memory after use.
 
     Usage: pwmanage <database.pwdb> <keyfile.key> -noclip
 
@@ -44,31 +47,32 @@ You can then add or import entries as required.
     # Core module details
     @{
     RootModule = 'Paschwords.psm1'
-    ModuleVersion = '3.99'
+    ModuleVersion = '4.0'
     GUID = 'd4f71764-0e43-4632-8b35-0f0a79b36f62'
     Author = 'Schvenn'
     CompanyName = 'Plath Consulting Incorporated'
     Copyright = '(c) Craig Plath. All rights reserved.'
     Description = 'Secure password manager using AES encryption and key-based protection.'
     CompatiblePSEditions = @('Desktop')
-    PowerShellVersion = '5.1'
     FunctionsToExport = @('paschwords')
+    PowerShellVersion = '5.1'
     
     # Configuration data
     PrivateData = @{
-    timetobootlimit = '60'
-    defaultdatabase = 'paschwords.pwdb'
-    dictionaryfile = 'common.dictionary'
-    archiveslimit = '5'
-    defaultkey = 'paschwords.key'
-    expirywarning = '365'
     databasedir = 'DefaultPowerShellDirectory\Modules\Paschwords\databases'
-    timeoutseconds = '900'
+    expirywarning = '365'
     delayseconds = '30'
-    backupfrequency = '7'
+    defaultdatabase = 'paschwords.pwdb'
+    timetobootlimit = '60'
+    dictionaryfile = 'common.dictionary'
+    privilegedir = 'DefaultPowerShellDirectory\Modules\Paschwords\.privilege'
+    timeoutseconds = '900'
     logretention = '30'
+    useragent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
+    archiveslimit = '5'
+    backupfrequency = '7'
     keydir = 'DefaultPowerShellDirectory\Modules\Paschwords\keys'
-    useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+    defaultkey = 'paschwords.key'
     }}
 
 A separate script "ValidateURLs.ps1" is included to test a file containing a list of URLs for connectivity. This is designed to be used with the Valid URLs search and export function within the module, but I am keeping it separate in order to ensure the Paschword manager remains completely offline and thereby limits its security exposure.
