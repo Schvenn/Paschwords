@@ -1,12 +1,13 @@
 # Paschwords
 A secure PowerShell module to manage and protect your passwords with industry-grade cryptography and integrity verification.
 
-    • Master password protected by PBKDF2 hashing, separating authentication (password.hash) and encryption (root.key) material.
-    • Per-entry and per-database HMACs to ensure integrity and detect tampering at every level.
+    • The master password is protected by PBKDF2 hashing, with separated authentication.
+    • Per-entry and per-database integrated HMACs ensure integrity and detect tampering.
     • AES-256-CBC encryption with unique random IVs for each key file, each password entry, and the entire database.
-    • Database storage serialized to JSON, compressed with GZIP, then encrypted and Base64-encoded for compactness and security.
-    • Encrypted password entries and key files use Base64 encoding for safe storage and easy interoperability.
-    • Designed for zero-trust handling: keys and secrets are carefully wiped or scrambled in memory after use and between database switches.
+    • The database and each password entry are also Base64 encoded.
+    • The database storage is serialized to JSON, compressed with GZIP, then encrypted and Base64-encoded.
+    • This means that each password is secured behind 7 layers of protection!
+    • Designed for zero-trust handling; the keys, secrets and database are overwritten multiple times and removed using multiple methods between every significant action.
 
     Usage: pwmanage <database.pwdb> <keyfile.key> -noclip
 
