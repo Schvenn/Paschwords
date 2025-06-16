@@ -6,7 +6,7 @@ A secure PowerShell module to manage and protect your passwords with industry-gr
     • AES-256-CBC encryption with unique random IVs for each key file, each password entry, and the entire database.
     • Database storage serialized to JSON, compressed with GZIP, then encrypted and Base64-encoded for compactness and security.
     • Encrypted password entries and key files use Base64 encoding for safe storage and easy interoperability.
-    • Designed for zero-trust handling — keys and secrets are carefully wiped or scrambled in memory after use.
+    • Designed for zero-trust handling: keys and secrets are carefully wiped or scrambled in memory after use and between database switches.
 
     Usage: pwmanage <database.pwdb> <keyfile.key> -noclip
 
