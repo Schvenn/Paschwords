@@ -8,6 +8,10 @@ A secure PowerShell module to manage and protect your passwords with industry-gr
     • The database storage is serialized to JSON, compressed with GZIP, then encrypted and Base64-encoded.
     • This means that each password is secured behind 7 layers of protection!
     • Designed for zero-trust handling; the keys, secrets and database are overwritten multiple times and removed using multiple methods between every significant action.
+    • RBAC with two layers of authentication and 3 layers of privilege.
+    • Brute-force protection against master password and individual user accounts.
+    • External NTP time verifcation and hash verification for trusted source execution.
+    • Timestamped activity logging which includes user details regarding standard and administrative activities.
 
     Usage: pwmanage <database.pwdb> <keyfile.key> -noclip
 
