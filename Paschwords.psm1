@@ -1,4 +1,4 @@
-function paschwords ($database = $script:database, $keyfile = $script:keyfile, [switch]$noclip) {# Password Manager.
+function paschwords ($database, $keyfile, [switch]$noclip) {# Password Manager.
 
 function initialize {# Load the user configuration.
 $script:database = $database; $script:keyfile = $keyfile; $script:powershell = Split-Path $profile; $basemodulepath = Join-Path $script:powershell "Modules\Paschwords"; $script:configpath = Join-Path $basemodulepath "Paschwords.psd1"
@@ -26,21 +26,36 @@ $script:archiveslimit = $config.PrivateData.archiveslimit
 $script:useragent = $config.PrivateData.useragent
 
 # Initialize privilege settings.
-$script:rootKeyFile = "$privilegedir\root.key"; $script:hashFile = "$privilegedir\password.hash"
+$script:rootKeyFile = "$privilegedir\root.key"; $script:hashFile = "$privilegedir\password.hash"; $script:registryFile = Join-Path $privilegedir "registry.db"; $script:loggedinuser = $null
 
 # Initialize non-PSD1 variables.
-$script:failedmaster = 0; $script:lockoutmaster = $false; $script:keypasscount = Get-Random -Minimum 3 -Maximum 50; $script:message = $null; $script:warning = $null; neuralizer; $script:sessionstart = Get-Date; $script:lastrefresh = 1000; $script:management = $false; $script:quit = $false; $script:timetoboot = $null; $script:noclip = $noclip; $script:disablelogging = $false; $script:logdir = Join-Path $PSScriptRoot 'logs'}
+$script:failedmaster = 0; $script:lockoutmaster = $false; $script:keypasscount = Get-Random -Minimum 3 -Maximum 50; $script:message = $null; $script:warning = $null; neuralizer; $script:sessionstart = Get-Date; $script:lastrefresh = 1000; $script:management = $false; $script:quit = $false; $script:timetoboot = $null; $script:noclip = $noclip; $script:disablelogging = $false; $script:logdir = Join-Path $PSScriptRoot 'logs'; $script:thisscript = (Get-FileHash -Algorithm SHA256 -Path $PSCommandPath).Hash; $hashcheck = $true; $script:ntpscript = (Get-FileHash -Algorithm SHA256 -Path $PSScriptRoot\CheckNTPTime.ps1).Hash}
 
 function setdefaults {# Set Key and Database defaults.
 # Check database validity.
-if (-not $script:database -or -not (Test-Path $script:database -ErrorAction SilentlyContinue)) {$script:database = $script:defaultdatabase}
+if (-not $script:database -or -not (Test-Path $script:database -ea SilentlyContinue)) {$script:database = $script:defaultdatabase}
 if ($script:database) {if (-not [System.IO.Path]::IsPathRooted($script:database)) {$script:database = Join-Path $script:databasedir $script:database}}
 
 # Check key validity, but allow the menu to load, even if there is no default key.
 $script:keyexists = $true
-if (-not $script:keyfile -or -not (Test-Path $script:keyfile -ErrorAction SilentlyContinue)) {$script:keyfile = $script:defaultkey}
 if ($script:keyfile -and -not [System.IO.Path]::IsPathRooted($script:keyfile)) {$script:keyfile = Join-Path $script:keydir $script:keyfile}
-if (-not (Test-Path $script:keyfile -ErrorAction SilentlyContinue) -and -not (Test-Path $script:defaultkey -ErrorAction SilentlyContinue)) {$script:keyexists = $false; $script:keyfile = $null; $script:database = $null}}
+if (-not $script:keyfile -or -not (Test-Path $script:keyfile -ea SilentlyContinue)) {$script:keyfile = $script:defaultkey}
+if (-not (Test-Path $script:keyfile -ea SilentlyContinue) -and -not (Test-Path $script:defaultkey -ea SilentlyContinue)) {$script:keyexists = $false; $script:keyfile = $null; $script:database = $null}}
+
+function verify {# Check the current time and current file hash against all valid versions.
+$hashFile = Join-Path $privilegedir 'validhashes.sha256'
+
+if (-not (Test-Path $hashFile)) {Write-Host -f red "`n`t    WARNING: " -n; Write-Host -f white "Hash file not found.`n`t    Cannot verify script integrity." -n}
+else {$validHashes = Get-Content $hashFile | ForEach-Object { $_.Trim()} | Where-Object {$_ -ne ''}
+if ($validHashes -notcontains $script:thisscript) {Write-Host -f red "`nWARNING: " -n; Write-Host -f yellow "This script has been tampered with. Do not trust it!`n"; return $false}
+if ($validHashes -notcontains $script:ntpscript) {Write-Host -f red "`nWARNING: " -n; Write-Host -f yellow "The NTP script used to validate the current time has been tampered with. Do not trust it!`n"; return $false}
+else {Write-Host -f green "`nFirst stage of validation complete."}}
+
+if (Test-Path $PSScriptRoot\CheckNTPTime.ps1) {$timecheck = & "$PSScriptRoot\CheckNTPTime.ps1"}
+if ($timecheck) {Write-Host -f green "Second stage of validation complete."}
+else {Write-Host -f red "Aborting due to untrusted system clock.`n"; return $false}
+
+return $true}
 
 function resizewindow {# Attempt to set window size if it's too small and the environment is not running inside Terminal.
 $minWidth = 130; $minHeight = 50; $buffer = $Host.UI.RawUI.BufferSize; $window = $Host.UI.RawUI.WindowSize
@@ -102,6 +117,234 @@ if ($input -match '^\d+$') {$index = [int]$input
 if ($index -ge 1 -and $index -le $sections.Count) {$selection = $index}
 else {$selection = $null}} else {""; return}}
 while ($true); return}
+
+#---------------------------------------------USER MANAGEMENT--------------------------------------
+
+function usermanagementmenu {# Render user management menu.
+cls
+Write-Host -f yellow "User Management:"
+Write-Host -f cyan ("-" * 50)
+Write-Host -f white "  [A]dd    user"
+Write-Host -f white "  [R]emove user"
+Write-Host -f white "  [U]pdate user"
+Write-Host -f white "  [V]iew   user registry"
+Write-Host -f white "  [B]ackup privlege settings"
+Write-Host -f white "↩️[RETURN]"
+Write-Host -f cyan ("-" * 50)
+if ($script:userresult) {$script:userresult = wordwrap $script:userresult 50; Write-Host -f white $script:userresult; Write-Host -f cyan ("-" * 50)} else {""}
+Write-Host -f yellow "`nChoose an option from above: " -n; $useraction = Read-Host; return $useraction}
+
+function usermanagement {# User management interface.
+$script:userresult = $null; nomessage; nowarning
+do {$useraction = usermanagementmenu; $logchoices = "." + $useraction; $logchoices = $logchoices -replace ". ", "."; if ($logchoices.length -gt 1) {logchoices $logchoices}
+switch ($useraction.ToUpper()) {'A' {addregistryuser}
+'R' {removeregistryuser}
+'U' {updateregistryuser}
+'V' {viewuser}
+'B' {backupprivilege}
+default  {if ($useraction.Length -gt 0) {$script:userresult = "Invalid choice."}
+else {$script:management = $false; logchoices '.q'; rendermenu; return}}}}
+while ($true)}
+
+function loadregistry {# Load the user registry.
+if (-not (Test-Path $script:registryFile)) {$script:users = @(); return}
+
+try {$raw = [IO.File]::ReadAllBytes($script:registryFile); $decompressed = [IO.Compression.GzipStream]::new([IO.MemoryStream]::new((unprotectbytesaeshmac $raw $script:key)), [IO.Compression.CompressionMode]::Decompress); $reader = [IO.StreamReader]::new($decompressed); $json = $reader.ReadToEnd(); $reader.Close(); $decompressed.Close()
+
+$entries = $json | ConvertFrom-Json -Depth 5
+if ($null -eq $entries) {$script:users = @(); return}
+elseif ($entries -isnot [System.Collections.IEnumerable]) {$entries = @($entries)}}
+catch {$script:warning = "❌ Failed to load registry."; $script:users = @(); return}
+
+$script:users = @()
+foreach ($entry in $entries) {$data = [PSCustomObject]@{Username = $entry.data.Username
+Password = $entry.data.Password
+Role = $entry.data.Role
+Created = $entry.data.Created
+Expires = $entry.data.Expires
+Active = $entry.data.Active}
+$fixedEntry = [PSCustomObject]@{data = $data; hmac = $entry.hmac}
+
+if (verifyentryhmac $fixedEntry) {$script:users += $fixedEntry}
+else {$script:warning = "⚠️ Registry entry failed HMAC check. Ignored."}}}
+
+function saveregistry {# Save the user registry.
+if (-not $script:users) {return}
+
+$wrapped = foreach ($entry in $script:users) {$data = $entry.data; $hmac = createperentryhmac $data $script:key; [PSCustomObject]@{data = $data; hmac = $hmac}}
+
+$json = $wrapped | ConvertTo-Json -Depth 5 -Compress; $bytes = [Text.Encoding]::UTF8.GetBytes($json); $ms = New-Object IO.MemoryStream; $gz = New-Object IO.Compression.GzipStream($ms, [IO.Compression.CompressionLevel]::Optimal); $gz.Write($bytes, 0, $bytes.Length); $gz.Close(); $final = protectbytesaeshmac $ms.ToArray() $script:key; [IO.File]::WriteAllBytes($script:registryFile, $final)}
+
+function addregistryuser {# Add to the user registry.
+loadregistry
+
+# Ask for username.
+Write-Host -f white "`n👤 Enter new username " -n; $username = Read-Host
+if (-not ($username -match '^[a-zA-Z]{6,12}[0-9]{0,3}$')) {$script:userresult = "❌ Invalid username format. Must be 6–12 letters, optionally ending in 0–3 digits."; return}
+
+if ($script:users | Where-Object {$_.data.Username -eq $username}) {$script:userresult = "⚠️ User already exists."; return}
+
+# Ask for password.
+Write-Host -f white "🔐 Enter password " -n; $secure1 = Read-Host -AsSecureString
+Write-Host -f white "🔁 Re-enter password " -n; $secure2 = Read-Host -AsSecureString
+$plain1 = [System.Net.NetworkCredential]::new("", $secure1).Password; $plain2 = [System.Net.NetworkCredential]::new("", $secure2).Password; $secure1.Dispose(); $secure2.Dispose()
+if ($plain1 -ne $plain2) {$script:userresult = "❌ Passwords do not match."; return}
+if ($plain1.Length -lt 8 -or $plain1 -notmatch '[a-z]' -or $plain1 -notmatch '[A-Z]' -or $plain1 -notmatch '[0-9]' -or $plain1 -notmatch '[^a-zA-Z0-9]') {$script:userresult = "❌ Password must be 8+ characters and include upper, lower, digit, and special character."; return}
+
+# Ask for role.
+Write-Host -f white "`n👥 Role? [standard/privileged] " -n; $role = Read-Host
+if ($role -notin @('standard','privileged')) {$script:userresult = "❌ Role must be 'standard' or 'privileged'."; return}
+
+# Ask for Expiration date.
+Write-Host -f white "⏳ Expiration date (yyyy-MM-dd) (leave blank or invalid = today + 365) " -n; $expires = Read-Host
+if (-not $expires) {$expiry = (Get-Date).AddDays(365)}
+else {try {$expiry = [datetime]::ParseExact($expires, 'yyyy-MM-dd', $null)}
+catch {$script:userresult = "❌ Invalid expiration format. Using default (today + 365 days)."; $expiry = (Get-Date).AddDays(365)}}
+
+# Ask for Active status.
+Write-Host -f white "🔘 Active? [true/false] (leave blank or invalid = true) " -n; $active = Read-Host
+if ($active.ToLower() -eq 'false') {$activeStatus = $false}
+else {if ($active -ne '' -and $active.ToLower() -ne 'true') {$script:userresult = "❌ Invalid active status. Defaulting to active."}
+$activeStatus = $true}
+
+$salt = New-Object byte[] 16; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($salt); $derived = derivekeyfrompassword $plain1 $salt; $sha256 = [Security.Cryptography.SHA256]::Create(); $hash = $sha256.ComputeHash($derived); $sha256.Dispose(); $encoded = [Convert]::ToBase64String($salt + $hash)
+
+$data = [PSCustomObject]@{Username = $username
+Password = $encoded
+Role     = $role
+Created  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
+Expires  = $expiry.ToUniversalTime().ToString("yyyy-MM-dd")
+Active   = $activeStatus}
+$hmac = createperentryhmac $data $script:key
+$entry = [PSCustomObject]@{data = $data; hmac = $hmac}
+$script:users += $entry; saveregistry; $script:userresult = "✅ User '$username' added as $role."}
+
+function updateregistryuser {# Update a user entry.
+loadregistry
+if (-not $script:users -or $script:users.Count -eq 0) {$script:userresult = "📭 No users found in registry."; return}
+
+Write-Host -f white "`n👤 Enter username to update: " -n; $username = Read-Host
+$entry = $script:users | Where-Object {$_.data.Username -eq $username}
+if (-not $entry) {$script:userresult = "❌ User '$username' not found."; return}
+
+# Update password
+Write-Host -f white "🔐 Enter new password (leave blank to keep current): " -n; $secure1 = Read-Host -AsSecureString
+if ($secure1.Length -gt 0) {Write-Host -f white "🔁 Re-enter new password: " -n; $secure2 = Read-Host -AsSecureString
+$plain1 = [System.Net.NetworkCredential]::new("", $secure1).Password; $plain2 = [System.Net.NetworkCredential]::new("", $secure2).Password; $secure1.Dispose(); $secure2.Dispose()
+if ($plain1 -ne $plain2) {$script:userresult = "❌ Passwords do not match."; return}
+if ($plain1.Length -lt 8 -or $plain1 -notmatch '[a-z]' -or $plain1 -notmatch '[A-Z]' -or $plain1 -notmatch '[0-9]' -or $plain1 -notmatch '[^a-zA-Z0-9]') {$script:userresult = "❌ Password must be 8+ characters and include upper, lower, digit, and special character."; return}
+
+$salt = New-Object byte[] 16; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($salt); $derived = derivekeyfrompassword $plain1 $salt; $sha256 = [Security.Cryptography.SHA256]::Create(); $hash = $sha256.ComputeHash($derived); $sha256.Dispose(); $encoded = [Convert]::ToBase64String($salt + $hash); $entry.data.Password = $encoded}
+
+# Update role
+Write-Host -f white "👥 Role? [standard/privileged] (leave blank to keep current) " -n; $role = Read-Host
+if ($role) {if ($role -notin @('standard','privileged')) {$script:userresult = "❌ Role must be 'standard' or 'privileged'."; return}
+$entry.data.Role = $role}
+
+# Update expiration date
+Write-Host -f white "⏳ Expiration date (yyyy-MM-dd) (leave blank to keep current) " -n; $expires = Read-Host
+if ($expires) {try {$expiry = [datetime]::ParseExact($expires, 'yyyy-MM-dd', $null); $entry.data.Expires = $expiry.ToString('yyyy-MM-dd')}
+catch {$script:userresult = "❌ Invalid expiration format."; return}}
+
+# Update active status
+Write-Host -f white "🔘 Active? [true/false] (leave blank to keep current) " -n; $active = Read-Host
+if ($active) {if ($active.ToLower() -in @('true','false')) {$entry.data.Active = [bool]::Parse($active)}
+else {$script:userresult = "❌ Active status must be 'true' or 'false'. Leaving unmodified."}}
+
+# Refresh HMAC and save
+$entry.hmac = createperentryhmac $entry.data $script:key; saveregistry; $script:userresult = "✅ User '$username' updated."}
+
+function removeregistryuser {# Remove a registered user.
+loadregistry
+if (-not $script:users -or $script:users.Count -eq 0) {$script:userresult = "📭 No users found in registry."; return}
+
+Write-Host -f white "`n👤 Enter username to remove: " -n; $username = Read-Host
+$entry = $script:users | Where-Object {$_.data.Username -eq $username}
+if (-not $entry) {$script:userresult = "❌ User '$username' not found."; return}
+
+Write-Host -f red "`nConfirm removal of user '$username': (Y/N) " -n; $confirm = Read-Host
+if ($confirm -match '^[Yy]') {$script:users = $script:users | Where-Object {$_.data.Username -ne $username}; saveregistry; $script:userresult = "✅ User '$username' removed."}
+else {$script:userresult = "Aborted."}}
+
+function viewuser {# View registered users.
+loadregistry
+
+if (-not $script:users -or $script:users.Count -eq 0) {$script:userresult = "📭 No users found in registry."; return}
+
+Write-Host -f white "`n📋 Registered Users:`n"
+
+foreach ($entry in $script:users) {if (-not (verifyentryhmac $entry)) {Write-Host -f red "⚠️  Skipping tampered or invalid user entry."; continue}
+$user = $entry.data; $status = if ($user.Active) {"✅ Active"} else {"🚫 Inactive"}
+Write-Host -f yellow ("-" * 50)
+Write-Host "👤 User:    $($user.Username)"
+Write-Host "🔑 Role:    $($user.Role)"
+Write-Host "🕓 Created: $($user.Created)"
+Write-Host "📅 Expires: $($user.Expires)"
+Write-Host "📌 Status:  $status"}
+Write-Host -f yellow ("-" * 50)
+Write-Host -f white "`n↩️[RETURN] " -n; Read-Host}
+
+function backupprivilege {# Zip all contents of $privilegedir.
+if (-not (Test-Path $privilegedir)) {Write-Host -f yellow "📁 Privilege directory not found. Creating..."; New-Item -ItemType Directory -Path $privilegedir -Force | Out-Null}
+
+$timestamp = (Get-Date).ToString("MM-dd-yyyy @ HH_mm_ss"); $backupName = "privileges ($timestamp).zip"; $backupPath = Join-Path $privilegedir $backupName; $tempDir = Join-Path $privilegedir ".tempbackup"
+if (Test-Path $tempDir) {Remove-Item -Recurse -Force -Path $tempDir -ErrorAction SilentlyContinue}
+New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+# Copy only direct contents, skip .zip and temp folder
+Get-ChildItem -Path $privilegedir -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ne '.zip' } | ForEach-Object {Copy-Item -Path $_.FullName -Destination (Join-Path $tempDir $_.Name) -Force}
+
+Compress-Archive -Path "$tempDir\*" -DestinationPath $backupPath -Force; Remove-Item $tempDir -Recurse -Force
+
+# Keep only 5 newest backups
+$backups = Get-ChildItem -Path $privilegedir -Filter 'privileges (*.zip)' | Sort-Object LastWriteTime -Descending
+if ($backups.Count -gt 5) {$backups | Select-Object -Skip 5 | Remove-Item -Force}
+
+$script:userresult = "✅ Privilege backup created:`n$backupName`n`nManual restore required. This was intentional, due to the volatile nature of these files. A user with sufficient access to the privilege directory will need to complete the restore activities, if required."}
+
+function authenticateuser {# Authentication mechanism.
+$maxFailures = 3; $lockoutDuration = [TimeSpan]::FromMinutes(30); $attemptsFilePrefix = ".locked.flag"; $script:standarduser = $false
+
+loadregistry
+
+if (-not $script:users -or $script:users.Count -eq 0) {Write-Host -f red "`t    No users found in registry."; return $false}
+
+while ($true) {Write-Host -f green "`t 👤 Username: " -n; $username = Read-Host
+if (-not $username) {Write-Host -f red "`t    Username required."; continue}
+$userEntry = $script:users | Where-Object {$_.data.Username -eq $username}
+if (-not $userEntry) {Write-Host -f red "`t    User not found."; continue}
+
+# Check account active and expiration date
+$expiresDate = [datetime]::ParseExact($userEntry.data.Expires, 'yyyy-MM-dd', $null); $nowDate = (Get-Date).ToUniversalTime().Date
+if (-not $userEntry.data.Active -or $nowDate -gt $expiresDate) {Write-Host -f red "`t    Account expired or inactive."; return $false}
+
+# Lock file path
+$lockFile = Join-Path $privilegedir "$username$attemptsFilePrefix"
+
+# Check lockout
+if (Test-Path $lockFile) {$lastWrite = (Get-Item $lockFile).LastWriteTimeUtc; $elapsed = (Get-Date).ToUniversalTime() - $lastWrite
+if ($elapsed -lt $lockoutDuration) {$remaining = $lockoutDuration - $elapsed; Write-Host -f red "`t    Account locked.`n`t    Try again in $([int]$remaining.TotalMinutes) minutes."; return $false}
+else {Remove-Item $lockFile -ea SilentlyContinue}}
+
+# Track login attempts count
+$failCount = 0
+if (Test-Path $lockFile) {$failCount = [int](Get-Content $lockFile -ea SilentlyContinue)}
+
+while ($true) {Write-Host -f green "`t 🔐 Password: " -n; $securePass = Read-Host -AsSecureString
+if (-not $securePass -or $securePass.Length -eq 0) {Write-Host -f red "`t    Password required."; continue}
+try {$plainPass = [System.Net.NetworkCredential]::new("", $securePass).Password
+if (-not $plainPass) {Write-Host -f red "`t    Password required."; continue}}
+catch {Write-Host -f red "`t    Invalid password input."; continue}
+
+$saltAndHash = [Convert]::FromBase64String($userEntry.data.Password); $salt = $saltAndHash[0..15]; $storedHash = $saltAndHash[16..($saltAndHash.Length - 1)]; $derived = [byte[]](derivekeyfrompassword $plainPass $salt); $sha256 = [Security.Cryptography.SHA256]::Create(); $computedHash = $sha256.ComputeHash($derived); $sha256.Dispose()
+
+$match = ($computedHash.Length -eq $storedHash.Length) -and (-not (Compare-Object $computedHash $storedHash))
+if ($match) {if (Test-Path $lockFile) {Remove-Item $lockFile -ea SilentlyContinue}
+$script:standarduser = ($userEntry.data.Role -eq 'standard'); $script:message = "✅ Authentication successful for user '$username'."; $script:loggedinuser = $username; return $true}
+
+$failCount++; Set-Content -Path $lockFile -Value $failCount; (Get-Item $lockFile).LastWriteTimeUtc = (Get-Date).ToUniversalTime(); $remainingAttempts = $maxFailures - $failCount
+if ($remainingAttempts -le 0) {Write-Host -f red "`t    Account locked.`n`t    Try again in 30 minutes."; return $false}
+Write-Host -f red "`t    Invalid password. $remainingAttempts attempt(s) remaining."}}}
 
 #---------------------------------------------PRIVILEGE FUNCTIONS----------------------------------
 
@@ -199,7 +442,7 @@ function derivekeyfrompassword ([object]$Password, [byte[]]$Salt) {# Derive a ke
 # Convert string to SecureString if needed
 if ($Password -is [string]) {$secure = ConvertTo-SecureString $Password -AsPlainText -Force}
 elseif ($Password -is [SecureString]) {$secure = $Password}
-else {$script:warning = "Password must be string or SecureString."; nomessage; rendermenu; return}
+else {$script:warning = "Password must be string or SecureString."; nomessage; return}
 
 # Extract plaintext password from SecureString
 $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
@@ -227,7 +470,7 @@ function unprotectbytesaeshmac ([byte[]]$ProtectedBytes, [byte[]]$Key) {# Decode
 $aesKey = $Key[0..31]; $hmacKey = $Key[32..63]; $hmacBytes = $ProtectedBytes[0..31]; $hmacBytes = [byte[]]$hmacBytes; $iv = $ProtectedBytes[32..47]; $cipherText = $ProtectedBytes[48..($ProtectedBytes.Length - 1)]
 
 $hmac = [System.Security.Cryptography.HMACSHA256]::new($hmacKey); $hmacData = $iv + $cipherText; $computedHmac = $hmac.ComputeHash($hmacData); $hbLen = $hmacBytes.Length; $chLen = $computedHmac.Length; $hbType = $hmacBytes.GetType().FullName; $chType = $computedHmac.GetType().FullName
-if (-not [System.Linq.Enumerable]::SequenceEqual($hmacBytes, $computedHmac)) {$script:warning = "`nHMAC validation failed. Data may have been tampered with or corrupted. Proceed with caution!"; rendermenu; return}
+if (-not [System.Linq.Enumerable]::SequenceEqual($hmacBytes, $computedHmac)) {$script:warning = "`nHMAC validation failed. Data may have been tampered with or corrupted. Proceed with caution!"; return}
 
 $aes = [System.Security.Cryptography.Aes]::Create(); $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC; $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7; $aes.Key = $aesKey; $aes.IV = $iv; $decryptor = $aes.CreateDecryptor(); $plainBytes = $decryptor.TransformFinalBlock($cipherText, 0, $cipherText.Length)
 
@@ -237,7 +480,7 @@ return [byte[]]$plainBytes}
 function fulldbexport {# Export the current database with all passwords in plaintext.
 
 if (masterlockout) {return}
-Write-Host -f green  "`n`t👑 Master Password " -n; $master = Read-Host -AsSecureString
+Write-Host -f green  "`n`t 👑 Master Password " -n; $master = Read-Host -AsSecureString
 if (-not (verifymasterpassword $master)) {$script:failedmaster ++; $script:warning = "Wrong master password. $([math]::Max(0,4 - $script:failedmaster)) attempts remain before lockout."; nomessage; rendermenu; return}
 
 # Verify database password
@@ -270,7 +513,7 @@ $script:message = "$databasename exported to fullexport_$databasename.csv"; nowa
 
 function decryptkey ($keyfile = $script:keyfile) {# Decrypt a keyfile and start session.
 nomessage; nowarning
-if (-not (Test-Path $keyfile -ErrorAction SilentlyContinue)) {$script:warning = "Encrypted key file not found."; nomessage; return}
+if (-not (Test-Path $keyfile -ea SilentlyContinue)) {$script:warning = "Encrypted key file not found."; nomessage; return}
 
 # Load entire keyfile bytes
 $raw = [IO.File]::ReadAllBytes($keyfile)
@@ -282,7 +525,7 @@ $salt = $raw[0..15]
 $encKey = $raw[16..($raw.Length - 1)]
 
 # Prompt for master password
-Write-Host -ForegroundColor Green "`n`t🔐 Password: " -n; $secureMaster = Read-Host -AsSecureString; $master = [System.Net.NetworkCredential]::new("", $secureMaster).Password; $secureMaster.Dispose()
+Write-Host -ForegroundColor Green "`n`t 🔐 Database Password: " -n; $secureMaster = Read-Host -AsSecureString; $master = [System.Net.NetworkCredential]::new("", $secureMaster).Password; $secureMaster.Dispose()
 try {$wrapKey = derivekeyfrompassword -Password $master -Salt $salt; $script:key = [byte[]](unprotectbytesaeshmac $encKey $wrapKey)[0..31]; $script:unlocked = $true; $script:sessionstart = Get-Date; $script:timetoboot = $null}
 catch {$script:warning = "Incorrect master password or corrupted key file. Clearing key and database settings."; $script:keyfile = $null; $script:database = $null; $script:unlocked = $false; nomessage}}
 
@@ -294,8 +537,8 @@ $bytes = unprotectbytesaeshmac ([Convert]::FromBase64String($base64)) $script:ke
 return [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0x00..[char]0x1F)}
 
 function loadjson {# Load and decrypt the database (without passwords)
-if (-not (Test-Path $script:database)) {$script:warning = "Database file not found: $script:database"; nomessage; return}
-if (-not (Test-Path $script:keyfile)) {$script:warning = "Keyfile not found: $script:keyfile"; nomessage; return}
+if (-not (Test-Path $script:database -ea SilentlyContinue)) {$script:warning = "Database file not found: $script:database"; nomessage; return}
+if (-not (Test-Path $script:keyfile -ea SilentlyContinue)) {$script:warning += "Keyfile not found: $script:keyfile"; nomessage; return}
 if (-not $script:key) {$script:warning = "Key not loaded. You must call decryptkey first."; nomessage; return}
 
 try {$bytes = [System.IO.File]::ReadAllBytes($script:database); $hmacStored = $bytes[-32..-1]; $ivPlusCipher = $bytes[0..($bytes.Length - 33)]; $hmac = [System.Security.Cryptography.HMACSHA256]::new($script:key); $hmacActual = $hmac.ComputeHash($ivPlusCipher)
@@ -404,8 +647,8 @@ Write-Host -f Yellow "| " -n
 Write-Host -f Green "$arrow $sortField".PadRight(10) -n
 Write-Host -f Yellow " | " -n
 Write-Host -f Cyan "↩️[ESC] " -n
-if ($validurls -and -not $standarduser) {Write-Host -f Green "`n`n[X]port valid URLs " -n}
-if (-not $validurls -and -not $standarduser) {Write-Host -f Green "`n`n[X]port current search results " -n}
+if ($validurls -and -not $script:standarduser) {Write-Host -f Green "`n`n[X]port valid URLs " -n}
+if (-not $validurls -and -not $script:standarduser) {Write-Host -f Green "`n`n[X]port current search results " -n}
 
 # User input for navigation and sorting
 $key = [Console]::ReadKey($true)
@@ -434,7 +677,7 @@ $page = 0}
 $page = 0}
 'Q' {nowarning; nomessage; rendermenu; return}
 'Escape' {nowarning; nomessage; rendermenu; return}
-'X' {if (-not $standarduser) {if ($validurls) {$outpath = Join-Path $script:databasedir 'validurls.txt'; $entries.data.URL | Sort-Object -Unique | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f cyan "`n`nExported " -n; Write-Host -f white "$($entries.Count)" -n; Write-Host -f cyan " valid URLs to: " -n; Write-Host -f white "$outpath"; launchvalidator; rendermenu; return}
+'X' {if (-not $script:standarduser) {if ($validurls) {$outpath = Join-Path $script:databasedir 'validurls.txt'; $entries.data.URL | Sort-Object -Unique | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f cyan "`n`nExported " -n; Write-Host -f white "$($entries.Count)" -n; Write-Host -f cyan " valid URLs to: " -n; Write-Host -f white "$outpath"; launchvalidator; rendermenu; return}
 elseif (-not $validurls) {$outpath = Join-Path $script:databasedir 'searchresults.csv'; @($entries.data) | Select-Object Title, Username, URL, Tags, Created, Expires | ConvertTo-Csv -NoTypeInformation | Out-File $outpath -Encoding UTF8 -Force; Write-Host -f white "Exported $($entries.Count) entries to: $outpath"; Write-Host -f cyan "`n↩️[RETURN] " -n; Read-Host; rendermenu; return}}}
 default {}}}}
 
@@ -773,12 +1016,17 @@ if ($choice -match '^[Yy]') {try {initializeprivilege -Key $aesKey -Master $mast
 catch {$script:warning = "Key created, but failed to initialize rotation support: $_"; return}}
 $script:keyfile = $keyfile; $script:keyexists = $true; $script:disablelogging = $false; nowarning}
 
-function validatedatabase {# Validate a database.
-Write-Host -f cyan "`n`n✅ Provide full path of PWDB file to validate: " -n; $filepath = Read-Host
-if ($filepath.Length -lt 1) {$script:warning = "Aborted."; nomessage; rendermenu}
-elseif (-not (Test-Path $filepath)) {$script:warning = "File not found: $filepath"; nomessage; rendermenu; return}
+function validatedatabase {# Validate a database and correct IV collisions.
+Write-Host -f cyan "`n`n📄 Provide name of PWDB file to validate: " -n; $file = Read-Host
+if ([string]::IsNullOrWhiteSpace($file)) {$script:warning = "Aborted."; nomessage; rendermenu; return}
+if (-not [IO.Path]::HasExtension($file)) {$file += ".pwdb"}
+if (-not [IO.Path]::IsPathRooted($file)) {$file = Join-Path $script:databasedir $file}
+elseif (-not (Test-Path $file)) {$script:warning = "File not found: $file"; nomessage; rendermenu; return}
 
-$script:database = $filepath; Write-Host -f cyan "`n🔑 Provide full path to the KEY file: " -n; $keypath = Read-Host
+$script:database = $file; Write-Host -f cyan "`n🔑 Provide KEY file required to open the PWDB: " -n; $keypath = Read-Host
+if ([string]::IsNullOrWhiteSpace($keypath)) {$script:warning = "Aborted."; nomessage; rendermenu; return}
+if (-not [IO.Path]::HasExtension($keypath)) {$keypath += ".key"}
+if (-not [IO.Path]::IsPathRooted($keypath)) {$keypath = Join-Path $script:keydir $keypath}
 if (-not (Test-Path $keypath)) {$script:warning = "Key file not found: $keypath"; nomessage; rendermenu; return}
 
 try {decryptkey $keypath
@@ -790,14 +1038,37 @@ elseif (-not ($script:jsondatabase -is [System.Collections.IEnumerable])) {$scri
 
 $badEntries = @(); $i = 0; $script:warning = $null
 foreach ($entry in $script:jsondatabase) {$i++; $missingFields = @()
-foreach ($field in 'Title','Password','URL') {if (-not ($entry.PSObject.Properties.Name -contains $field)) {$missingFields += $field}}
+foreach ($field in 'Title','Password','URL') {if (-not ($entry.data.PSObject.Properties.Name -contains $field)) {$missingFields += $field}}
 if ($missingFields.Count -gt 0) {$badEntries += [PSCustomObject]@{Index = $i; Content = $entry; Reason  = "Missing required field(s): $($missingFields -join ', ')"}
 continue}
 if (-not (verifyentryhmac $entry)) {$badEntries += [PSCustomObject]@{Index = $i; Content = $entry; Reason  = "Failed HMAC validation."}}}
 
 if ($badEntries.Count -gt 0) {Write-Host -f red "`nSome entries are malformed or failed HMAC verification:`n"; $badEntries | Format-Table -AutoSize; Write-Host -f yellow "`n↩️ Return " -n; Read-Host; rendermenu}
-else {$script:message = "✔  All entries are valid."; nowarning; rendermenu}}
-catch {$script:warning = "❌ Verification failed:`n$($_.Exception.Message)"; nomessage; rendermenu}}
+
+# 🧪 Detect and resolve IV collisions (same IV in multiple entries)
+$ivSeen = @{}; $collisions = 0
+for ($i = 0; $i -lt $script:jsondatabase.Count; $i++) {$entry = $script:jsondatabase[$i]
+try {if ([string]::IsNullOrWhiteSpace($entry.data.Password)) {Write-Host -f darkyellow "⚠️ Entry $i`: Empty password — skipping."; continue}
+$cipherBytes = [Convert]::FromBase64String($entry.data.Password)
+if ($cipherBytes.Length -lt 16) {Write-Host -f darkyellow "⚠️ Entry $i`: Cipher too short — skipping."; continue}
+$iv = [BitConverter]::ToString($cipherBytes[0..15]) -replace '-', ''}
+catch {Write-Host -f red "⚠️ Entry $i`: Invalid base64 — skipping."; continue}
+if ($ivSeen.ContainsKey($iv)) {foreach ($ix in @($i, $ivSeen[$iv])) {$e = $script:jsondatabase[$ix]; $plain = decryptentry $e
+if ($plain) {$data = [PSCustomObject]@{Title = $plain.Title
+Username = $plain.Username
+Password = if ([string]::IsNullOrWhiteSpace($e.data.Password)) {$plain.Password} else {encryptpassword $plain.Password $script:key}
+URL = $plain.URL
+Tags = $plain.Tags
+Notes = $plain.Notes
+Created = $plain.Created
+Expires = $plain.Expires}
+$script:jsondatabase[$ix] = [PSCustomObject]@{Data = $data; HMAC = createperentryhmac $data $script:key}}}
+$collisions++}
+else {$ivSeen[$iv] = $i}}}
+catch {$script:warning = "❌ Verification failed:`n$($_.Exception.Message)"; nomesssage; rendermenu}
+
+if ($collisions -gt 0) {savetodisk; $script:warning = "⚠️  Detected and re-encrypted $collisions IV collision(s) with no data changes."}
+else {$script:message = "✅ All entries are valid and IVs are unique. 🛡️"}; rendermenu}
 
 function importcsv ($csvpath) {# Import a CSV file into the database.
 
@@ -993,7 +1264,7 @@ Copy-Item $script:database -Destination $tempDir; Copy-Item $script:keyfile -Des
 
 function scheduledbackup {# Run backup according to PSD1 settings.
 $baseName = [System.IO.Path]::GetFileNameWithoutExtension($script:database)
-$backups = Get-ChildItem -Path $script:databasedir -File "*.zip" -ErrorAction SilentlyContinue | Where-Object {$_.Name -like "$baseName*(*@*).zip"}
+$backups = Get-ChildItem -Path $script:databasedir -File "*.zip" -ea SilentlyContinue | Where-Object {$_.Name -like "$baseName*(*@*).zip"}
 $needBackup = $true
 $newest = $backups | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
@@ -1004,11 +1275,11 @@ if ($needBackup) {Write-Host -f darkgray "💾 Creating new backup..."; backup}
 else {$script:message = $script:message + "`n🕒 No scheduled backup is currently required."; nowarning; rendermenu}
 
 # Enforce archive limit
-$backups = Get-ChildItem -Path $script:databasedir -File "$baseName*(*.zip)" -ErrorAction SilentlyContinue
+$backups = Get-ChildItem -Path $script:databasedir -File "$baseName*(*.zip)" -ea SilentlyContinue
 
 $sortedBackups = $backups | Sort-Object LastWriteTime -Descending
 if ($sortedBackups.Count -gt $script:archiveslimit) {$toDelete = $sortedBackups | Select-Object -Skip $script:archiveslimit
-foreach ($file in $toDelete) {try {Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop; $script:message = $script:message + "`n🗑️ Deleted old backup: $($file.Name)"; nowarning}
+foreach ($file in $toDelete) {try {Remove-Item -LiteralPath $file.FullName -Force -ea Stop; $script:message = $script:message + "`n🗑️ Deleted old backup: $($file.Name)"; nowarning}
 catch {$script:warning = "⚠️ Failed to delete: $($file.FullName) - $_"}}}; rendermenu; return}
 
 function restore {# Restore a backup.
@@ -1271,13 +1542,14 @@ elseif ($choice -eq 'C') {$script:emoji = "🔑 Create a key"}
 elseif ($choice -eq 'D') {$script:emoji = "📑 Select a database"}
 elseif ($choice -eq 'P') {$script:emoji = "📄 Create a database"}
 elseif ($choice -eq 'N') {$script:emoji = "👑 New master password"}
-elseif ($choice -eq 'F') {$script:emoji = "👑 [F]ull DB export"}
+elseif ($choice -eq 'F') {$script:emoji = "👑 Full DB export"}
 elseif ($choice -eq 'V') {$script:emoji = "✅ Verify a database"}
 elseif ($choice -eq 'I') {$script:emoji = "📥 Import from CSV"}
 elseif ($choice -eq 'OEMMINUS') {$script:emoji = "📤 Export to CSV"}
 elseif ($choice -eq 'SUBTRACT') {$script:emoji = "📤 Export to CSV"}
 elseif ($choice -eq 'OEMCOMMA') {$script:emoji = "📦←︎ Backup"}
 elseif ($choice -eq 'OEMPERIOD') {$script:emoji = "📦→︎ Restore"}
+elseif ($choice -eq 'G') {$script:emoji = "🪪 Grant user privileges"}
 elseif ($choice.length -gt 1) {$script:emoji = ""}
 else {$script:emoji = $choice}
 return $script:emoji}
@@ -1360,8 +1632,8 @@ else {Write-Host "`t`t    🔒 "-n}; linecap
 horizontal
 
 # Loaded resource display.
-if ($script:database) {$displaydatabase = Split-Path -Leaf $script:database -ErrorAction SilentlyContinue} else {$displaydatabase = "none loaded"}
-if ($script:keyfile) {$displaykey = Split-Path -Leaf $script:keyfile -ErrorAction SilentlyContinue} else {$displaykey = "none loaded"}
+if ($script:database) {$displaydatabase = Split-Path -Leaf $script:database -ea SilentlyContinue} else {$displaydatabase = "none loaded"}
+if ($script:keyfile) {$displaykey = Split-Path -Leaf $script:keyfile -ea SilentlyContinue} else {$displaykey = "none loaded"}
 $databasestatus = if ($db -and $key -and $db -ne $key) {"🤔"} elseif ($displaykey -eq "none loaded" -or $displaydatabase -eq "none loaded" -or $script:unlocked -eq $false) {"🔒"} else {"🔓"}
 $keystatus = if ($script:unlocked -eq $false -or $displaykey -eq "none loaded") {"🔒"} else {"🔓"}
 
@@ -1402,7 +1674,7 @@ startline; Write-Host -f cyan " P. " -n; Write-Host -f yellow "📄 Create a new
 horizontal
 startline; Write-Host -f cyan " N. " -n; Write-Host -f white "👑 [N]ew master password.".padright(66) -n; linecap
 horizontal
-startline;  Write-Host -f cyan " V. " -n; Write-Host -f white "✅ [V]alidate a PWDB file.".padright(65) -n; linecap
+startline;  Write-Host -f cyan " V. " -n; Write-Host -f white "✅ [V]alidate a PWDB file and correct IV collisions.".padright(65) -n; linecap
 horizontal
 startline; Write-Host -f cyan " I. " -n; Write-Host -f yellow "📥 [I]mport a CSV plaintext password database.".padright(66) -n; linecap
 startline; Write-Host -f cyan " -  " -n; Write-Host -f white "📤 Export the current database to CSV. " -n; Write-Host -f green "Encryption remains intact. " -n; linecap
@@ -1418,9 +1690,9 @@ startline; if ($script:unlocked -eq $true) {Write-Host " 🔓 " -n} else {Write-
 if ($script:unlocked -eq $true) {Write-Host -f red "[L]ock Session " -n} else {Write-Host -f darkgray "[L]ock Session " -n}
 Write-Host -f white "/ " -n;
 if ($script:unlocked -eq $true) {Write-Host -f darkgray "[U]nlock session".padright(22) -n} else {Write-Host -f green "[U]nlock session".padright(22) -n}
-if (-not (Test-Path $script:keyfile -ErrorAction SilentlyContinue)) {Write-Host -f black -b yellow "❓ [H]elp <-- " -n; Write-Host "".padright(4) -n}
+if (-not (Test-Path $script:keyfile -ea SilentlyContinue)) {Write-Host -f black -b yellow "❓ [H]elp <-- " -n; Write-Host "".padright(4) -n}
 else {Write-Host -f yellow "❓ [H]elp".padright(17) -n}
-Write-Host -f gray "⏏️ [ESC] " -n;; linecap
+Write-Host -f gray "⏏️ [ESC] " -n;; linecap 
 endcap
 
 # Message and warning center.
@@ -1438,7 +1710,7 @@ if ($script:disablelogging) {return}
 if ($message) {$logmessage = ($message -replace '🔐 Password:.*', '🔐 Password: [REDACTED]' -replace '🔗 URL: .*', '🔗 URL:      [REDACTED]' -replace '🆔 UserName:.*', '🆔 UserName: [REDACTED]') -split '(?m)^[-]{10,}' | Select-Object -First 1}
 
 # Map keys to descriptions.
-$map = @{'A' = 'Add an entry'; 'R' = 'Retrieve an entry'; 'X' = 'Remove an entry'; 'B' = 'Browse entries'; 'E' = 'View expired entries'; 'S' = 'Search entries'; 'L' = 'Lock'; 'U' = 'Unlock'; 'T' = 'Reset timer'; 'O' = 'Restore Default Key & Database'; 'Z' = 'Toggle Clipboard'; 'M' = 'Toggle management view'; 'K' = 'Select a key'; 'C' = 'Create a key'; 'D' = 'Select a database'; 'P' = 'Create a database'; 'V' = 'Verify a PWDB'; 'I' = 'Import a CSV'; 'OEMMINUS' = 'Export to CSV'; 'SUBTRACT' = 'Export to CSV'; 'OEMPERIOD' = 'Backup key and database'; 'OEMCOMMA' = 'Restore a key and database'; 'Q' = 'Quit'; 'H' = 'Help'; 'F1' = 'Help'; 'F4' = 'Toggle logging'; 'BACKSPACE' = 'Clear message center'; 'D1' = 'Find IPs'; 'D2' = 'Find invalid URLs'; 'D3' = 'Find valid URLs'; 'F9' = 'Display configuration information'; 'F10' = 'Development testing function'}
+$map = @{'A' = 'Add an entry'; 'B' = 'Browse entries'; 'C' = 'Create a key'; 'D' = 'Select a database'; 'D1' = 'Find IPs'; 'D2' = 'Find invalid URLs'; 'D3' = 'Find valid URLs'; 'E' = 'View expired entries'; 'G' = 'Grant user privileges'; '.A' = 'Add user';'.B' = 'Backup privilege settings'; '.R' = 'Remove user'; '.U' = 'Update user'; '.V' = 'View user registry';'.Q' = 'Quit Grant user privileges'; 'H' = 'Help'; 'I' = 'Import a CSV'; 'K' = 'Select a key'; 'L' = 'Lock'; 'M' = 'Toggle management view'; 'O' = 'Restore Default Key & Database'; 'P' = 'Create a database'; 'Q' = 'Quit'; 'R' = 'Retrieve an entry'; 'S' = 'Search entries'; 'T' = 'Reset timer'; 'U' = 'Unlock'; 'V' = 'Verify a PWDB'; 'X' = 'Remove an entry'; 'Z' = 'Toggle Clipboard'; 'F1' = 'Help'; 'F10' = 'Development testing function'; 'F4' = 'Toggle logging'; 'F9' = 'Display configuration information'; 'OEMPERIOD' = 'Backup key and database'; 'OEMCOMMA' = 'Restore a key and database'; 'OEMMINUS' = 'Export to CSV'; 'SUBTRACT' = 'Export to CSV'; 'BACKSPACE' = 'Clear message center'}
 
 # Create directory, if it doesn't exist.
 if (-not (Test-Path $script:logdir)) {New-Item $script:logdir -ItemType Directory -Force | Out-Null}
@@ -1453,7 +1725,7 @@ if (-not $script:logfile) {$timestamp = (Get-Date).ToString('MM-dd-yy @ HH_mm_ss
 if (-not $map.ContainsKey($choice)) {Add-Content -Path $script:logfile -Value "$(Get-Date -Format 'HH:mm:ss') - UNRECOGNIZED: $choice"; return}
 
 # Compile entry information.
-$timestamp = Get-Date -Format 'HH:mm:ss'; $info = "$(if ($message) {" - MESSAGE: $logmessage"})$(if ($warning) {" - WARNING: $warning"})"; $entry = "$timestamp - $($map[$choice])$info`n" + ("-" * 100)
+$timestamp = Get-Date -Format 'HH:mm:ss'; $info = "$(if ($message) {" - MESSAGE: $logmessage"})$(if ($warning) {" - WARNING: $warning"})"; $entry = "$timestamp - $script:loggedinuser - $($map[$choice])$info`n" + ("-" * 100)
 
 # Ensure log gets written by retrying 5 times for every log, to avoid race conditions.
 $retries = 5
@@ -1471,12 +1743,21 @@ $_.Group | ForEach-Object {Remove-Item $_.FullName -Force}
 gziplog $output; Remove-Item $output -Force}}
 
 function login {# Display initial login screen.
-$script:sessionstart = Get-Date; $key = $null
-Write-Host -f yellow "`n+-------------------------------+`n|🔑 Secure Paschwords Manager 🔒|`n|-------------------------------|" -n
-decryptkey $script:keyfile}
+initialize; setdefaults; logcleanup; resizewindow
+if (-not (verify)) {return}
+
+$script:sessionstart = Get-Date; $script:key = $null; Write-Host -f yellow "`n`t+-------------------------------------+`n`t|  🔑  Secure Paschwords Manager  🔒  |`n`t|-------------------------------------|" -n
+
+# Unlock the database and authenticate the user in order to allow access, if the environment is already established.
+if (-not $script:keyexists -and -not (Test-Path $script:registryFile -ea SilentlyContinue)) {loggedin}
+elseif (-not $script:keyexists) {Write-Host -f white "`n`t`tNo database key present.`n`t"; loginfailed}
+elseif ($script:keyexists) {decryptkey $script:keyfile
+if (-not $script:key) {loginfailed}
+if (authenticateuser) {loggedin} 
+else {loginfailed}}}
 
 function loginfailed {# Login failed.
-Write-Host -f yellow "+-------------------------------+`n|" -n; Write-Host -f red " 😲 Access Denied! ABORTING!🔒 " -n; Write-Host -f yellow "|`n+-------------------------------+`n"; return}
+Write-Host -f yellow "`t|-------------------------------------|`n`t|" -n; Write-Host -f red "   😲  Access Denied! ABORTING! 🔒   " -n; Write-Host -f yellow "|`n`t+-------------------------------------+`n"; return}
 
 function logoff {# Exit screen.
 nowarning; nomessage; Write-Host -f red "Securing the environment..."; neuralizer; $choice=$null; rendermenu; Write-Host -f white "`n`t`t    ____________________`n`t`t   |  ________________  |`n`t`t   | |                | |`n`t`t   | |   🔒 "-n; Write-Host -f red "Locked." -n; Write-Host -f white "   | |`n`t`t   | |                | |`n`t`t   | |________________| |`n`t`t   |____________________|`n`t`t    _____|_________|_____`n`t`t   / * * * * * * * * * * \`n`t`t  / * * * * * * * * * * * \`n`t`t ‘-------------------------’`n"; return}
@@ -1537,7 +1818,7 @@ elseif ($searchterm) {retrieveentry $script:jsondatabase $script:keyfile $search
 rendermenu}
 
 'X' {# Remove an entry.
-limitedaccess; if ($standarduser) {break}
+limitedaccess; if ($script:standarduser) {break}
 Write-Host -f red "`n`n❌ Enter Title, Username, URL, Tag or Note to identify entry: " -n; $searchterm = Read-Host; removeentry $searchterm; rendermenu}
 
 'B' {# Browse all entries from memory.
@@ -1584,11 +1865,8 @@ else {showentries $script:jsondatabase -validurls; nomessage; nowarning}}
 'M' {# Toggle Management mode.
 if ($script:management -eq $true) {$script:management = $false; nowarning; nomessage; rendermenu; break}
 
-limitedaccess; if ($standarduser) {rendermenu; break}
-if (masterlockout) {rendermenu; break}
+limitedaccess; if ($script:standarduser) {rendermenu; break}
 
-Write-Host -f green  "`n`n`t👑 Enter Master Password " -n; $master = Read-Host -AsSecureString
-if (-not (verifymasterpassword $master)) {$script:failedmaster ++; $script:warning = "Wrong master password. $([math]::Max(0,4 - $script:failedmaster)) attempts remain before lockout."}
 else {nowarning; $script:management = $true}
 nomessage; rendermenu; break}
 
@@ -1634,12 +1912,12 @@ else {$script:jsondatabase = $null; $script:jsondatabase = @(); decryptkey $scri
 savetodisk; $script:message = "📄 New database $getdatabase created."; nowarning}; rendermenu}}
 
 'N' {# New master password.
-limitedaccess; if ($standarduser) {break}
+limitedaccess; if ($script:standarduser) {break}
 managementisdisabled
 if ($script:key) {rotatemasterpassword; rendermenu}}
 
 'F' {# Full db export.
-limitedaccess; if ($standarduser) {break}
+limitedaccess; if ($script:standarduser) {break}
 managementisdisabled
 if ($script:key) {fulldbexport; rendermenu}}
 
@@ -1654,7 +1932,7 @@ $script:message = "Imported files must contain the fields: Title, Username, Pass
 if (-not $script:database -and -not $script:keyfile) {$script:warning = "You must have a database and key file loaded in order to start an import."; nomessage; return}
 Write-Host -f yellow "`n`n📥 Enter the full path to the CSV file: " -n; $csvpath = Read-Host
 if ($csvpath.length -lt 1) {$script:warning = "Aborted."; nomessage; rendermenu}
-elseif (Test-Path $csvpath -ErrorAction SilentlyContinue) {importcsv $csvpath}
+elseif (Test-Path $csvpath -ea SilentlyContinue) {importcsv $csvpath}
 else {$script:warning = "CSV not found."; nomessage}; rendermenu}
 
 'OEMMINUS' {# Export all entries.
@@ -1738,15 +2016,15 @@ nomessage; nowarning; rendermenu}
 nomessage; nowarning; rendermenu}
 
 'F4' {# Turn off Logging.
-limitedaccess; if ($standarduser) {break}
+limitedaccess; if ($script:standarduser) {break}
 if ($script:keyfile -match '\\([^\\]+)$') {$shortkey = $matches[1]}
 if ($script:disablelogging -eq $true) {$script:warning = "Logging is already turned off for $shortkey."; nomessage; rendermenu; break}
 elseif ($script:disablelogging -eq $false) {$script:disablelogging = $true; $script:warning = "Logging temporarily turned off for $shortkey @ $(Get-Date)"; nomessage; rendermenu}}
 
 'F9' {# Configuration details.
 limitedaccess
-$fixedkeydir = $keydir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $fixeddatabasedir = $databasedir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $configfileonly = $script:configpath -replace '.+\\', ''; $keyfileonly = $defaultkey -replace '.+\\', ''; $databasefileonly = $defaultdatabase -replace '.+\\', ''; $dictionaryfileonly = $dictionaryfile -replace '.+\\', ''; $timeoutminutes = [math]::Floor($timeoutseconds / 60)
-$script:message = "Configuration Details:`n`nVersion:`t`t   $script:version`nConfiguration File Path: $configfileonly`nDefault Key:             $keyfileonly`nDefault Database:        $databasefileonly`nDictionary File:         $dictionaryfileonly`n`nSession Inactivity Timer: $timeoutseconds seconds / $timeoutminutes minutes`nScript Inactivity Timer:  $script:timetobootlimit minutes`nClipboard Timer:          $delayseconds seconds`nEntry Expiration Warning: $expirywarning days`nLog Retention:            $logretention days`nBackup Frequency:         $script:backupfrequency days`nArchives Limit:           $script:archiveslimit ZIP files`n`nDirectories:`n$fixedkeydir`n$fixeddatabasedir`n`nValidateURLs User-Agent:`n$script:useragent"; nowarning; rendermenu}
+$fixedkeydir = $keydir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $fixeddatabasedir = $databasedir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $configfileonly = $script:configpath -replace '.+\\', ''; $keyfileonly = $defaultkey -replace '.+\\', ''; $databasefileonly = $defaultdatabase -replace '.+\\', ''; $dictionaryfileonly = $dictionaryfile -replace '.+\\', ''; $timeoutminutes = [math]::Floor($timeoutseconds / 60); $privilege = if ($script:standarduser) {"Standard user"} else {"Privileged user"}
+$script:message = "Configuration Details:`n`nCurrent User:`t`t   $script:loggedinuser`nAccess:`t`t   $privilege`n`nVersion:`t`t   $script:version`nConfiguration File Path: $configfileonly`nDefault Key:             $keyfileonly`nDefault Database:        $databasefileonly`nDictionary File:         $dictionaryfileonly`n`nSession Inactivity Timer: $timeoutseconds seconds / $timeoutminutes minutes`nScript Inactivity Timer:  $script:timetobootlimit minutes`nClipboard Timer:          $delayseconds seconds`nEntry Expiration Warning: $expirywarning days`nLog Retention:            $logretention days`nBackup Frequency:         $script:backupfrequency days`nArchives Limit:           $script:archiveslimit ZIP files`n`nDirectories:`n$fixedkeydir`n$fixeddatabasedir`n`nValidateURLs User-Agent:`n$script:useragent"; nowarning; rendermenu}
 
 'F10' {# Modify PSD1 configuration.
 limitedaccess; modifyconfiguration; $script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; Write-Host -f yellow "Reloading default key and database."; $script:key = decryptkey $script:keyfile
@@ -1754,8 +2032,18 @@ if ($script:unlocked) {$script:message = "New configuration active. Default key 
 rendermenu}
 
 'F12' {# Sort and resave database.
-limitedaccess; if ($standarduser) {break}
+limitedaccess; if ($script:standarduser) {break}
 saveandsort; if ($script:message) {$script:message += "`nDatabase has been sorted by tag, then title."}; rendermenu}
+
+'G' {# Grant user privileges.
+managementisdisabled
+
+if (masterlockout) {rendermenu; break}
+
+Write-Host -f green  "`n`n`t👑 Enter Master Password " -n; $master = Read-Host -AsSecureString
+if (-not (verifymasterpassword $master)) {$script:failedmaster ++; $script:warning = "Wrong master password. $([math]::Max(0,4 - $script:failedmaster)) attempts remain before lockout."}
+
+usermanagement; rendermenu}
 
 'OEM3' {# Test function while in development.
 #if ($script:standarduser -eq $true) {$script:standarduser = $false; $script:message = "Limited access is disabled."; nowarning; rendermenu}
@@ -1769,8 +2057,7 @@ $script:sessionstart = Get-Date
 $choice = $null}} while (-not $script:quit)}
 
 # Initialize and launch.
-initialize; setdefaults; logcleanup; resizewindow; login
-if (-not $script:key -and (Test-Path $script:keyfile -ErrorAction SilentlyContinue)) {loginfailed} else {loggedin}}
+login}
 
 Export-ModuleMember -Function paschwords
 
