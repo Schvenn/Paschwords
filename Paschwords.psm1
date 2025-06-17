@@ -298,7 +298,7 @@ Compress-Archive -Path "$tempDir\*" -DestinationPath $backupPath -Force; Remove-
 
 # Keep only 5 newest backups
 $backups = Get-ChildItem -Path $privilegedir -Filter 'privileges (*.zip)' | Sort-Object LastWriteTime -Descending
-if ($backups.Count -gt 5) {$backups | Select-Object -Skip 5 | Remove-Item -Force}
+if ($backups.Count -gt 5) {$backups | Select-Object -Skip $script:archiveslimit | Remove-Item -Force}
 
 $script:userresult = "✅ Privilege backup created:`n$backupName`n`nManual restore required. This was intentional, due to the volatile nature of these files. A user with sufficient access to the privilege directory will need to complete the restore activities, if required."}
 
@@ -1537,6 +1537,8 @@ return $password}
 function emoji {# Display emoji in Choose an Action prompt when there are processing delays.
 $script:emoji = $null
 if ($choice -eq $null) {$script:emoji = ""}
+elseif ($choice -eq 'X') {$script:emoji = "❌ Remove an entry"}
+elseif ($choice -eq 'M') {$script:emoji = "🛠️ Management mode"}
 elseif ($choice -eq 'K') {$script:emoji = "🗝  Select a key"}
 elseif ($choice -eq 'C') {$script:emoji = "🔑 Create a key"}
 elseif ($choice -eq 'D') {$script:emoji = "📑 Select a database"}
@@ -1549,16 +1551,19 @@ elseif ($choice -eq 'OEMMINUS') {$script:emoji = "📤 Export to CSV"}
 elseif ($choice -eq 'SUBTRACT') {$script:emoji = "📤 Export to CSV"}
 elseif ($choice -eq 'OEMCOMMA') {$script:emoji = "📦←︎ Backup"}
 elseif ($choice -eq 'OEMPERIOD') {$script:emoji = "📦→︎ Restore"}
+elseif ($choice -eq 'F4') {$script:emoji = "🔴 Disable logging"}
+elseif ($choice -eq 'F10') {$script:emoji = "🛠️ Modify configuration"}
+elseif ($choice -eq 'F12') {$script:emoji = "📄 Sort and save database"}
 elseif ($choice -eq 'G') {$script:emoji = "🪪 Grant user privileges"}
 elseif ($choice.length -gt 1) {$script:emoji = ""}
 else {$script:emoji = $choice}
 return $script:emoji}
 
-function managementisdisabled {# Restrict access to specific features.
-emoji; if (-not $script:management) {$script:warning = "'$script:emoji' is disabled outside of management mode."; nomessage; rendermenu; break}}
+function limiteduser {# Standard user limitations, regardless of management mode.
+emoji; if ($script:standarduser) {$script:warning = "Access to '$script:emoji' is restricted."; nomessage}}
 
-function limitedaccess {# Restrict access to management keys only.
-if ($script:standarduser) {$script:warning = "Access to this feature is restricted."; nomessage; rendermenu; break}}
+function managementisdisabled {# Restrict access to specific features.
+emoji; if (-not $script:management) {$script:warning = "Access to '$script:emoji' is restricted."; nomessage}}
 
 function modifyconfiguration {# Modify the PSD1 configuration.
 # Load current settings
@@ -1653,7 +1658,7 @@ horizontal
 startline; Write-Host -f cyan " A. " -n; Write-Host -f yellow "➕ [A]dd a new entry or update an existing one.".padright(65) -n; linecap
 $clipboard = if ($script:noclip -eq $true) {"🚫"} else {"📋"}
 startline; Write-Host -f cyan " R. " -n; Write-Host -f white "🔓 [R]etrieve an entry.".padright(50) -n; Write-Host -f cyan "Z. " -n; Write-Host -f white "Clipboard $clipboard " -n; linecap
-startline; Write-Host -f cyan " X. " -n; Write-Host -f red "❌ Remove an entry.".padright(41) -n; if($script:disablelogging){Write-Host -f red "Logging is disabled. 🔴 " -n} else {Write-Host -f green "Logging is enabled.  🟢 " -n};linecap
+startline; Write-Host -f cyan " X. " -n; Write-Host -f red "❌ Remove an entry.".padright(41) -n; if ($script:disablelogging) {Write-Host -f red "Logging is disabled. 🔴 " -n} else {Write-Host -f green "Logging is enabled.  🟢 " -n};linecap
 horizontal
 startline; Write-Host -f cyan " B. " -n; Write-Host -f white "🧐 [B]rowse all entries: " -n; Write-Host -f cyan "$(($script:jsondatabase).Count)".padright(41) -n; linecap
 $today = Get-Date; $expiredcount = ($script:jsondatabase | Where-Object {$_.data.Expires -and ($_.data."Expires" -as [datetime]) -le $today}).Count
@@ -1710,7 +1715,7 @@ if ($script:disablelogging) {return}
 if ($message) {$logmessage = ($message -replace '🔐 Password:.*', '🔐 Password: [REDACTED]' -replace '🔗 URL: .*', '🔗 URL:      [REDACTED]' -replace '🆔 UserName:.*', '🆔 UserName: [REDACTED]') -split '(?m)^[-]{10,}' | Select-Object -First 1}
 
 # Map keys to descriptions.
-$map = @{'A' = 'Add an entry'; 'B' = 'Browse entries'; 'C' = 'Create a key'; 'D' = 'Select a database'; 'D1' = 'Find IPs'; 'D2' = 'Find invalid URLs'; 'D3' = 'Find valid URLs'; 'E' = 'View expired entries'; 'G' = 'Grant user privileges'; '.A' = 'Add user';'.B' = 'Backup privilege settings'; '.R' = 'Remove user'; '.U' = 'Update user'; '.V' = 'View user registry';'.Q' = 'Quit Grant user privileges'; 'H' = 'Help'; 'I' = 'Import a CSV'; 'K' = 'Select a key'; 'L' = 'Lock'; 'M' = 'Toggle management view'; 'O' = 'Restore Default Key & Database'; 'P' = 'Create a database'; 'Q' = 'Quit'; 'R' = 'Retrieve an entry'; 'S' = 'Search entries'; 'T' = 'Reset timer'; 'U' = 'Unlock'; 'V' = 'Verify a PWDB'; 'X' = 'Remove an entry'; 'Z' = 'Toggle Clipboard'; 'F1' = 'Help'; 'F10' = 'Development testing function'; 'F4' = 'Toggle logging'; 'F9' = 'Display configuration information'; 'OEMPERIOD' = 'Backup key and database'; 'OEMCOMMA' = 'Restore a key and database'; 'OEMMINUS' = 'Export to CSV'; 'SUBTRACT' = 'Export to CSV'; 'BACKSPACE' = 'Clear message center'}
+$map = @{'A' = 'Add an entry'; 'B' = 'Browse entries'; 'C' = 'Create a key'; 'D' = 'Select a database'; 'D1' = 'Find IPs'; 'D2' = 'Find invalid URLs'; 'D3' = 'Find valid URLs'; 'E' = 'View expired entries'; 'G' = 'Grant user privileges'; '.A' = 'Add user';'.B' = 'Backup privilege settings'; '.R' = 'Remove user'; '.U' = 'Update user'; '.V' = 'View user registry';'.Q' = 'Quit Grant user privileges'; 'H' = 'Help'; 'I' = 'Import a CSV'; 'K' = 'Select a key'; 'L' = 'Lock'; 'M' = 'Toggle management view'; 'O' = 'Restore Default Key & Database'; 'P' = 'Create a database'; 'Q' = 'Quit'; 'R' = 'Retrieve an entry'; 'S' = 'Search entries'; 'T' = 'Reset timer'; 'U' = 'Unlock'; 'V' = 'Verify a PWDB'; 'X' = 'Remove an entry'; 'Z' = 'Toggle Clipboard'; 'F1' = 'Help'; 'F4' = 'Toggle logging'; 'F9' = 'Display configuration information'; 'F10' = 'Modify configuation'; 'F12' = 'Sort and save database'; 'OEMPERIOD' = 'Backup key and database'; 'OEMCOMMA' = 'Restore a key and database'; 'OEMMINUS' = 'Export to CSV'; 'SUBTRACT' = 'Export to CSV'; 'BACKSPACE' = 'Clear message center'}
 
 # Create directory, if it doesn't exist.
 if (-not (Test-Path $script:logdir)) {New-Item $script:logdir -ItemType Directory -Force | Out-Null}
@@ -1818,7 +1823,7 @@ elseif ($searchterm) {retrieveentry $script:jsondatabase $script:keyfile $search
 rendermenu}
 
 'X' {# Remove an entry.
-limitedaccess; if ($script:standarduser) {break}
+limiteduser; if ($script:standarduser) {rendermenu; break}
 Write-Host -f red "`n`n❌ Enter Title, Username, URL, Tag or Note to identify entry: " -n; $searchterm = Read-Host; removeentry $searchterm; rendermenu}
 
 'B' {# Browse all entries from memory.
@@ -1864,14 +1869,13 @@ else {showentries $script:jsondatabase -validurls; nomessage; nowarning}}
 
 'M' {# Toggle Management mode.
 if ($script:management -eq $true) {$script:management = $false; nowarning; nomessage; rendermenu; break}
-
-limitedaccess; if ($script:standarduser) {rendermenu; break}
+if ($script:standarduser) {limiteduser; rendermenu; break}
 
 else {nowarning; $script:management = $true}
-nomessage; rendermenu; break}
+nomessage; rendermenu}
 
 'K' {# Select a different password encryption key.
-managementisdisabled
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 $script:keyfiles = Get-ChildItem -Path $script:keydir -Filter *.key
 if (-not $script:keyfiles) {$script:warning = "No .key files found."; nomessage; rendermenu}
 elseif ($script:keyfiles) {Write-Host -f white "`n`n🗝  Available AES Key Files:"; Write-Host -f yellow ("-" * 70)
@@ -1884,14 +1888,14 @@ $script:message = "$shortkey selected and made active."; nowarning; $script:disa
 if (-not $script:key) {$script:warning += " Key decryption failed. Aborting."; nomessage}}}; rendermenu}
 
 'C' {# Create a new password encryption key.
-managementisdisabled
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 Write-Host -f green "`n`n🔑 Enter filename for new keyfile: " -n; $getkey = Read-Host
 if ($getkey -lt 1) {$script:warning = "No filename entered."; nomessage; rendermenu}
 else {if (-not $getkey.EndsWith(".key")) {$getkey += ".key"}
 newkey $getkey; rendermenu}}
 
 'D' {# Select a different database.
-managementisdisabled
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 $dbFiles = Get-ChildItem -Path $script:databasedir -Filter *.pwdb
 if (-not $dbFiles) {$script:warning = "No .pwdb files found."; nomessage; rendermenu}
 else {Write-Host -f white "`n`n📑 Available Password Databases:"; Write-Host -f yellow ("-" * 70)
@@ -1902,7 +1906,7 @@ if ($script:jsondatabase.Count -eq 0) {$script:warning = "If changing database a
 else {$script:warning = "Invalid selection."; nomessage}; rendermenu}}
 
 'P' {# Create a new password database.
-managementisdisabled
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 Write-Host -f green "`n`n📄 Enter filename for new password database: " -n; $getdatabase = Read-Host
 if ($getdatabase.length -lt 1) {$script:warning = "No filename entered."; nomessage; rendermenu}
 else {if (-not $getdatabase.EndsWith(".pwdb")) {$getdatabase += ".pwdb"}
@@ -1912,22 +1916,20 @@ else {$script:jsondatabase = $null; $script:jsondatabase = @(); decryptkey $scri
 savetodisk; $script:message = "📄 New database $getdatabase created."; nowarning}; rendermenu}}
 
 'N' {# New master password.
-limitedaccess; if ($script:standarduser) {break}
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 managementisdisabled
 if ($script:key) {rotatemasterpassword; rendermenu}}
 
 'F' {# Full db export.
-limitedaccess; if ($script:standarduser) {break}
-managementisdisabled
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 if ($script:key) {fulldbexport; rendermenu}}
 
-
 'V' {# Verify a PWDB file.
-managementisdisabled
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 validatedatabase}
 
 'I' {# Import a CSV password database.
-managementisdisabled
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 $script:message = "Imported files must contain the fields: Title, Username, Password and URL. Timestamp is ignored and Password can be empty, but must exist. All other fields can be added as notes and/or tags. Fields added to notes will only be added if they are populated. Fields added to tags can be added to all imported entries or only those that are populated."; nowarning
 if (-not $script:database -and -not $script:keyfile) {$script:warning = "You must have a database and key file loaded in order to start an import."; nomessage; return}
 Write-Host -f yellow "`n`n📥 Enter the full path to the CSV file: " -n; $csvpath = Read-Host
@@ -1936,7 +1938,7 @@ elseif (Test-Path $csvpath -ea SilentlyContinue) {importcsv $csvpath}
 else {$script:warning = "CSV not found."; nomessage}; rendermenu}
 
 'OEMMINUS' {# Export all entries.
-managementisdisabled
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 nomessage; nowarning; rendermenu
 Write-Host -f yellow "`n`nProvide an export path for the database.`nOtherwise the database directory will be used: " -n; $path = Read-Host
 if ($path.length -lt 1) {$path = "$script:database"; $path = $path -replace '\.pwdb$', '.csv'}
@@ -1947,8 +1949,8 @@ Write-Host -f yellow "`nProceed? (Y/N) " -n; $confirmexport = Read-Host
 if ($confirmexport -match "^[Yy]$") {export $path $fields} else {$script:warning = "Aborted."; nomessage; rendermenu}}
 
 'SUBTRACT' {# Export all entries.
-managementisdisabled
-nomessage; nowarning; rendermenu; rendermenu
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
+nomessage; nowarning; rendermenu
 Write-Host -f yellow "`n`nProvide an export path for the database.`nOtherwise the database directory will be used: " -n; $path = Read-Host
 if ($path.length -lt 1) {$path = "$script:database"; $path = $path -replace '\.pwdb$', '.csv'}
 Write-Host -f yellow "`nSpecify the fields and the order in which to includet them.`nThe default is (" -n; Write-Host -f white "Title, Username, URL" -n; Write-Host -f yellow "): " -n; $fields = Read-Host
@@ -1958,20 +1960,20 @@ Write-Host -f yellow "`nProceed? (Y/N) " -n; $confirmexport = Read-Host
 if ($confirmexport -match "^[Yy]$") {export $path $fields; rendermenu} else {$script:warning = "Aborted."; nomessage; rendermenu}}
 
 'OEMCOMMA' {# Backup current database and key.
-managementisdisabled
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 backup; rendermenu}
 
 'OEMPERIOD' {# Retore a backup.
-managementisdisabled
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 restore; rendermenu}
 
 'L' {# Lock session.
-$script:message = "Session locked."; nowarning; neuralizer; if ($script:noclip -eq $false) {clearclipboard 0 64}; rendermenu}
+$script:message = "Session locked."; nowarning; neuralizer; rendermenu}
 
 'U' {# Unlock session.
 if ($script:keyfile) {""; decryptkey $script:keyfile}
 else {$script:warning = "🔑 No key loaded."; nomessage}
-if ($script:unlocked) {loadjson; $script:message += " Session unlocked."}; nowarning; rendermenu}
+if ($script:unlocked) {loadjson; $script:disablelogging = $false; $script:message += " Session unlocked."}; nowarning; rendermenu}
 
 'Z' {# Toggle clipboard.
 if ($script:noclip -eq $true) {$script:noclip = $false; $script:message = "Retrieved passwords will be copied to the clipboard for $script:delayseconds seconds."; nowarning; rendermenu}
@@ -2016,27 +2018,33 @@ nomessage; nowarning; rendermenu}
 nomessage; nowarning; rendermenu}
 
 'F4' {# Turn off Logging.
-limitedaccess; if ($script:standarduser) {break}
+if ($script:standarduser) {limiteduser; rendermenu; break}
 if ($script:keyfile -match '\\([^\\]+)$') {$shortkey = $matches[1]}
 if ($script:disablelogging -eq $true) {$script:warning = "Logging is already turned off for $shortkey."; nomessage; rendermenu; break}
 elseif ($script:disablelogging -eq $false) {$script:disablelogging = $true; $script:warning = "Logging temporarily turned off for $shortkey @ $(Get-Date)"; nomessage; rendermenu}}
 
 'F9' {# Configuration details.
-limitedaccess
 $fixedkeydir = $keydir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $fixeddatabasedir = $databasedir -replace '\\\\', '\' -replace '\\\w+\.\w+',''; $configfileonly = $script:configpath -replace '.+\\', ''; $keyfileonly = $defaultkey -replace '.+\\', ''; $databasefileonly = $defaultdatabase -replace '.+\\', ''; $dictionaryfileonly = $dictionaryfile -replace '.+\\', ''; $timeoutminutes = [math]::Floor($timeoutseconds / 60); $privilege = if ($script:standarduser) {"Standard user"} else {"Privileged user"}
 $script:message = "Configuration Details:`n`nCurrent User:`t`t   $script:loggedinuser`nAccess:`t`t   $privilege`n`nVersion:`t`t   $script:version`nConfiguration File Path: $configfileonly`nDefault Key:             $keyfileonly`nDefault Database:        $databasefileonly`nDictionary File:         $dictionaryfileonly`n`nSession Inactivity Timer: $timeoutseconds seconds / $timeoutminutes minutes`nScript Inactivity Timer:  $script:timetobootlimit minutes`nClipboard Timer:          $delayseconds seconds`nEntry Expiration Warning: $expirywarning days`nLog Retention:            $logretention days`nBackup Frequency:         $script:backupfrequency days`nArchives Limit:           $script:archiveslimit ZIP files`n`nDirectories:`n$fixedkeydir`n$fixeddatabasedir`n`nValidateURLs User-Agent:`n$script:useragent"; nowarning; rendermenu}
 
 'F10' {# Modify PSD1 configuration.
-limitedaccess; modifyconfiguration; $script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; Write-Host -f yellow "Reloading default key and database."; $script:key = decryptkey $script:keyfile
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
+modifyconfiguration; $script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; Write-Host -f yellow "Reloading default key and database."; $script:key = decryptkey $script:keyfile
 if ($script:unlocked) {$script:message = "New configuration active. Default key and database successfully loaded and made active."; nowarning}
 rendermenu}
 
 'F12' {# Sort and resave database.
-limitedaccess; if ($script:standarduser) {break}
+managementisdisabled; if ($script:standarduser) {rendermenu; break} 
+
+if (masterlockout) {rendermenu; break}
+
+Write-Host -f green  "`n`n`t👑 Enter Master Password " -n; $master = Read-Host -AsSecureString
+if (-not (verifymasterpassword $master)) {$script:failedmaster ++; $script:warning = "Wrong master password. $([math]::Max(0,4 - $script:failedmaster)) attempts remain before lockout."}
+
 saveandsort; if ($script:message) {$script:message += "`nDatabase has been sorted by tag, then title."}; rendermenu}
 
 'G' {# Grant user privileges.
-managementisdisabled
+managementisdisabled; if ($script:standarduser) {rendermenu; break}
 
 if (masterlockout) {rendermenu; break}
 
@@ -2045,12 +2053,7 @@ if (-not (verifymasterpassword $master)) {$script:failedmaster ++; $script:warni
 
 usermanagement; rendermenu}
 
-'OEM3' {# Test function while in development.
-#if ($script:standarduser -eq $true) {$script:standarduser = $false; $script:message = "Limited access is disabled."; nowarning; rendermenu}
-#elseif ($script:standarduser -eq $false -or -not $script:standarduser) {$script:standarduser = $true; $script:message = "Limited access is enabled."; nowarning; rendermenu}
-}
-
-default {if ($choice.length -gt 0) {$script:warning = "'$choice' is an invalid choice. Try again."}}}
+default {if ($choice.length -gt 0) {$script:warning = "'$choice' is an invalid choice."}}}
 
 # Reset on key press.
 $script:sessionstart = Get-Date
@@ -2078,6 +2081,7 @@ When the clipboard empties, it is first overwritten with junk, in order to reduc
 
 There are also some hidden keys within the main menu:
 
+• Use 'G' to launch the User management menu.
 • Use 'F4' to disable logging for the currently loaded key, until the key is locked or unloaded.
 • Use 'F9' to see the current script configuration details and 'F10' to change them.
 • Use 'F12' to sort the currently loaded database by tag, then title and save the changes to disk.
