@@ -1757,8 +1757,7 @@ $script:sessionstart = Get-Date; $script:key = $null; Write-Host -f yellow "`n`t
 if (-not $script:keyexists -and -not (Test-Path $script:registryFile -ea SilentlyContinue)) {loggedin}
 elseif (-not $script:keyexists) {Write-Host -f white "`n`t`tNo database key present.`n`t"; loginfailed}
 elseif ($script:keyexists) {decryptkey $script:keyfile
-if (-not $script:key) {loginfailed}
-if (authenticateuser) {loggedin} 
+if ($script:key) {if (authenticateuser) {loggedin}}
 else {loginfailed}}}
 
 function loginfailed {# Login failed.
