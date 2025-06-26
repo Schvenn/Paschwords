@@ -38,6 +38,7 @@ The options required were obvious and the need for a master password was, as wel
 I know this has very practical applications, because I work for clients who have systems that are extremely well locked down.
 That means however, that they do not let you install unapproved software, but most will let you install PowerShell modules.
 So, I created this module to be able to fill that niche and it just keeps growing.
+
 The inital databases were plaintext, but those have been replaced with encrypted and compressed files, and several other advanced security features have been added along the way, including RBAC and HMAC integration.
 <br><br>
 A setup wizard and full help text is provided inline.
