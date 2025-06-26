@@ -1,17 +1,17 @@
 # Paschwords
 A secure PowerShell module to manage and protect your passwords with industry-grade cryptography and integrity verification.
 
-    • The master password is protected by PBKDF2 hashing, with separated authentication.
-    • Per-entry and per-database a user registry integrated HMACs ensure integrity and detect tampering.
-    • AES-256-CBC encryption with unique random IVs for each key file, each password entry, the user registry and the entire database.
-    • The database and each password entry are also Base64 encoded.
-    • The database storage is serialized to JSON, compressed with GZIP, then encrypted and Base64-encoded.
-    • This means that each password is secured behind 7 layers of protection, even more if you include the user registry protection!
-    • Designed for zero-trust handling; the keys, secrets and database are overwritten multiple times and removed using multiple methods between every significant action.
-    • RBAC with two layers of authentication and 3 layers of privilege.
-    • Brute-force protection against master password and individual user accounts.
-    • External NTP time verifcation and hash verification for trusted source execution.
-    • Timestamped activity logging which includes user details regarding standard and administrative activities.
+    • The master password is secured via PBKDF2-based key derivation with separate authentication verification.
+    • Each password entry and the database incorporate per-entry HMACs to ensure integrity and detect tampering; the user registry is protected by file-level HMAC.
+    • AES-256-CBC encryption with unique, random IVs is applied to each key file, password entry, user registry, and the entire database.
+    • Database passwords are encrypted and Base64-encoded individually within the database.
+    • The database is serialized to JSON, compressed with GZIP, then encrypted at rest.
+    • This layered approach ensures robust security through strong KDFs, encryption, integrity verification, compression, and encoding.
+    • Designed with zero-trust principles; keys, secrets, and databases are securely wiped multiple times using diverse methods after critical operations.
+    • Role-Based Access Control (RBAC) enforces two-factor authentication and three privilege levels.
+    • Brute-force protection mechanisms safeguard both the master password and individual user accounts.
+    • External NTP time synchronization and hash verification enable trusted source execution.
+    • Comprehensive, timestamped activity logs record both standard and administrative user actions.
 
     Usage: pwmanage <database.pwdb> <keyfile.key> -noclip
 
