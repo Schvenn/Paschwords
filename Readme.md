@@ -2,10 +2,11 @@
 A secure PowerShell module to manage and protect your passwords with industry-grade cryptography and integrity verification.
 
     • The master password is secured via PBKDF2-based key derivation with separate authentication verification.
-    • Each password entry and the database incorporate per-entry HMACs to ensure integrity and detect tampering; the user registry is protected by file-level HMAC.
-    • AES-256-CBC encryption with unique, random IVs is applied to each key file, password entry, user registry, and the entire database.
-    • Database passwords are encrypted and Base64-encoded individually within the database.
-    • The database is serialized to JSON, compressed with GZIP, then encrypted at rest.
+    • Each password entry, each password database, and the user registry incorporate HMACs to ensure integrity and detect tampering.
+    • AES-256-CBC encryption with unique, random IVs is applied to each key file, password entry, password database and the user registry.
+    • Database passwords are additionally encrypted and Base64-encoded individually within the database.
+    • The database is serialized to JSON, compressed with GZIP, then encrypted at rest and features the aforementioned file-level HMAC.
+    • The user registry is serialized to JSON, then encrypted at rest and features the file-level HMAC.
     • This layered approach ensures robust security through strong KDFs, encryption, integrity verification, compression, and encoding.
     • Designed with zero-trust principles; keys, secrets, and databases are securely wiped multiple times using diverse methods after critical operations.
     • Role-Based Access Control (RBAC) enforces two-factor authentication and three privilege levels.
