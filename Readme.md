@@ -1,12 +1,14 @@
 # Paschwords
 A secure PowerShell module to manage and protect your passwords with industry-grade cryptography and integrity verification.
 
-    • The master password is secured via PBKDF2-based key derivation with separate authentication verification.
-    • Each password entry, each password database, and the user registry incorporate HMACs to ensure integrity and detect tampering.
-    • AES-256-CBC encryption with unique, random IVs is applied to each key file, password entry, password database and the user registry.
-    • Database passwords are additionally encrypted and Base64-encoded individually within the database.
-    • The database is serialized to JSON, compressed with GZIP, then encrypted at rest and features the aforementioned file-level HMAC.
-    • The user registry is serialized to JSON, then encrypted at rest and features the file-level HMAC.
+    • Database passwords are secured via PBKDF2-based key derivation, salted and hashed with SHA-256, but are never stored.
+    • Master passwords are secured similarly using PBKDF2 with salt and SHA-256 hashing, and validated via a separate authentication mechanism.
+    • User registry passwords are processed using PBKDF2, then salted, hashed, and Base64 encoded. These passwords differ fundamentally from database passwords because they are never decrypted, reflecting a one-way authentication model.
+    • Each password entry within a database, each password database at the file level, and the user registry at the file level are all encrypted with AES-256-CBC using unique, random IVs after which, HMAC validation is appended in order to ensure integrity and detect tampering.
+    • After database passwords are individually AES-encrypted, they are then Base64-encoded, before per-entry HMAC is appended.
+    • The database is serialized to JSON, compressed with GZIP, then encrypted at rest, at which point the file-level HMAC is appended.
+    • The user registry is serialized to JSON, then encrypted at rest and features file-level HMAC.
+    • Since the user registry always remains small, per entry HMAC and file level GZip compression would provide no appreciable security or size benefits, which is why it differs in implementation from the database and entries stored therein.
     • This layered approach ensures robust security through strong KDFs, encryption, integrity verification, compression, and encoding.
     • Designed with zero-trust principles; keys, secrets, and databases are securely wiped multiple times using diverse methods after critical operations.
     • Role-Based Access Control (RBAC) enforces two-factor authentication and three privilege levels.
