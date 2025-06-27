@@ -16,6 +16,8 @@ A secure PowerShell module to manage and protect your passwords with industry-gr
     • External NTP time synchronization and hash verification enable trusted source execution.
     • Comprehensive, timestamped activity logs record both standard and administrative user actions.
 
+    • v4.5 introduces at rest encryption and compression for the module. By using a loader script, the module is decrypted and executed exclusively in memory, providing one more layer of security.
+
     Usage: pwmanage <database.pwdb> <keyfile.key> -noclip
 
 # Overview
