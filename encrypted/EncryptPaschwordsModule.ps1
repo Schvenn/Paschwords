@@ -31,7 +31,7 @@ $content = [System.IO.File]::ReadAllText($sourcepath); [byte[]]$raw = [System.Te
 # Add HMAC.
 $protected = protectbytesaeshmac -Data $compressed -Key $Key
 
-try {[IO.File]::WriteAllBytes($script:outputpath, $Salt + $protected); Write-Host -ForegroundColor Green "Write operation succeeded"}
+try {[IO.File]::WriteAllBytes($script:outputpath, $Salt + $protected); Write-Host -ForegroundColor Green "Write operation succeeded"; $powershell = Split-Path $profile; Add-Content -Path "$powershell\Modules\Paschwords\.privilege\validhashes.sha256" -Value "# Paschwords.enc ($(Get-Date))`n$((Get-FileHash -Algorithm SHA256 $powershell\Modules\Paschwords\Paschwords.enc).Hash)"}
 catch {Write-Host -ForegroundColor Red "Write operation failed: $_"}}
 
 # User interaction.
