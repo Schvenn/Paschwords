@@ -63,7 +63,7 @@ $script:rootkeyFile = "$privilegedir\root.key"; $script:rootkey = $null; $script
 
 # Obtain verify hashes.
 $encodedscript = Resolve-Path 'Paschwords.enc' -ea SilentlyContinue; $modulescript = Resolve-Path 'Paschwords.psm1' -ea SilentlyContinue
-$thisscript = if ($script:basemodulepath -and (Test-Path $modulescript)) {$modulescript} elseif (Test-Path $encodedscript -ea SilentlyContinue) {$encodedscript}
+$thisscript = if ($script:basemodulepath -and (Test-Path $modulescript -ea SilentlyContinue)) {$modulescript} elseif (Test-Path $encodedscript -ea SilentlyContinue) {$encodedscript}
 else {Write-Host -f red "`nNo valid script file found in order to validate hash.`n"}
 $script:thisscript = (Get-FileHash -Algorithm SHA256 -Path $thisscript).Hash; $hashcheck = $true; $script:ntpscript = (Get-FileHash -Algorithm SHA256 -Path $script:basemodulepath\CheckNTPTime.ps1).Hash
 
