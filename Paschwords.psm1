@@ -9,9 +9,12 @@ $script:failedmaster = 0; $script:lockoutmaster = $false
 $script:keypasscount = Get-Random -Minimum 3 -Maximum 50
 
 # Test & import configuration settings
-$basemodulepath = Join-Path $script:powershell "Modules\Paschwords"; $script:configpath = Join-Path $basemodulepath "Paschwords.psd1"
+$script:basemodulepath = Join-Path $script:powershell "Modules\Paschwords"; $script:configpath = Join-Path $script:basemodulepath "Paschwords.psd1"
 if (!(Test-Path $script:configpath)) {throw "Config file not found at $script:configpath"}
 $config = Import-PowerShellDataFile -Path $configpath
+
+# Change directories.
+$script:startingdirectory = "$pwd"; sl $script:basemodulepath
 
 # KeyDir & DefaultKey
 $script:keydir = $config.PrivateData.keydir; $script:defaultkey = $config.PrivateData.defaultkey; $script:keydir = $script:keydir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:defaultkey = Join-Path $script:keydir $script:defaultkey
@@ -20,7 +23,7 @@ $script:keydir = $config.PrivateData.keydir; $script:defaultkey = $config.Privat
 $script:databasedir = $config.PrivateData.databasedir; $script:defaultdatabase = $config.PrivateData.defaultdatabase; $script:databasedir = $script:databasedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:defaultdatabase = Join-Path $script:databasedir $script:defaultdatabase
 
 # PrivilegeDir & LogDir
-$script:privilegedir = $config.PrivateData.privilegedir; $script:privilegedir = $script:privilegedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:logdir = Join-Path $PSScriptRoot 'logs'
+$script:privilegedir = $config.PrivateData.privilegedir; $script:privilegedir = $script:privilegedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:logdir = $config.PrivateData.logdir; $script:logdir = $script:logdir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell)
 
 # Default User Registry
 $basename = [IO.Path]::GetFileNameWithoutExtension($script:defaultkey); $script:defaultregistry = Join-Path $privilegedir "$basename.db"
@@ -48,7 +51,7 @@ if ([int]$script:expirywarning -gt 365 -or [int]$script:expirywarning -lt 0) {$s
 $script:logretention = $config.PrivateData.logretention
 if ([int]$script:logretention -lt 30) {$script:logretention = 30}
 
-$script:dictionaryfile = $config.PrivateData.dictionaryfile; $script:dictionaryfile = Join-Path $basemodulepath $script:dictionaryfile
+$script:dictionaryfile = $config.PrivateData.dictionaryfile; $script:dictionaryfile = Join-Path $script:basemodulepath $script:dictionaryfile
 
 $script:backupfrequency = $config.PrivateData.backupfrequency
 $script:archiveslimit = $config.PrivateData.archiveslimit
@@ -56,10 +59,13 @@ $script:archiveslimit = $config.PrivateData.archiveslimit
 $script:useragent = $config.PrivateData.useragent
 
 # Initialize privilege settings.
-$script:rootkeyFile = "$privilegedir\root.key"; $script:hashFile = "$privilegedir\password.hash"
+$script:rootkeyFile = "$privilegedir\root.key"; $script:rootkey = $null; $script:hashFile = "$privilegedir\password.hash"
 
 # Obtain verify hashes.
-$script:thisscript = (Get-FileHash -Algorithm SHA256 -Path $PSCommandPath).Hash; $hashcheck = $true; $script:ntpscript = (Get-FileHash -Algorithm SHA256 -Path $PSScriptRoot\CheckNTPTime.ps1).Hash
+$encodedscript = Resolve-Path 'Paschwords.enc' -ea SilentlyContinue; $modulescript = Resolve-Path 'Paschwords.psm1' -ea SilentlyContinue
+$thisscript = if ($script:basemodulepath -and (Test-Path $modulescript)) {$modulescript} elseif (Test-Path $encodedscript -ea SilentlyContinue) {$encodedscript}
+else {Write-Host -f red "`nNo valid script file found in order to validate hash.`n"}
+$script:thisscript = (Get-FileHash -Algorithm SHA256 -Path $thisscript).Hash; $hashcheck = $true; $script:ntpscript = (Get-FileHash -Algorithm SHA256 -Path $script:basemodulepath\CheckNTPTime.ps1).Hash
 
 # Initialize menu variables.
 $script:sessionstart = Get-Date; $script:lastrefresh = 1000; $script:timetoboot = $null; $script:noclip = $noclip; $script:disablelogging = $false
@@ -93,7 +99,7 @@ if ($keyfile) {$providedkeyname = [IO.Path]::GetFileNameWithoutExtension($keyfil
 if (-not (Test-Path $script:keyfile -ea SilentlyContinue) -and -not (Test-Path $script:defaultkey -ea SilentlyContinue)) {$script:keyexists = $false; $script:keyfile = $null; $script:registryfile = $null; $script:database = $null}}
 
 function verify {# Check the current time and current file hash against all valid versions.
-$hashfile = Join-Path $privilegedir 'validhashes.sha256'
+$hashfile = Join-Path $script:privilegedir 'validhashes.sha256'
 
 if (-not (Test-Path $hashfile -ea SilentlyContinue)) {Write-Host -f red "`n`t  WARNING: " -n; Write-Host -f white "Hash file not found. Cannot`n`t  verify script integrity. Unless this`n`t  is a fresh install, do not proceed.`n`n`t  For safety reasons, please download`n`t  and copy the validhashes.sha256 file`n`t  into your privilege directory."; Write-Host -f red "`n`t  First stage of validation failed."}
 
@@ -110,7 +116,7 @@ if (-not (verifymasterpassword $masterSecure)) {$script:failedmaster++; if (mast
 
 else {resetmasterfailures; Write-Host -f green "`t  Permission granted.`n"; $timecheck = $true}}}
 
-if (-not $notime) {if (Test-Path $PSScriptRoot\CheckNTPTime.ps1 -ea SilentlyContinue) {$timecheck = & "$PSScriptRoot\CheckNTPTime.ps1"}
+if (-not $notime) {if (Test-Path $script:basemodulepath\CheckNTPTime.ps1 -ea SilentlyContinue) {$timecheck = & "$script:basemodulepath\CheckNTPTime.ps1"}
 else {$timecheck = $false}}
 
 if ($timecheck) {Write-Host -f green "`t  Second stage of validation passed."}
@@ -196,7 +202,7 @@ function loginfailed {# Login failed.
 Write-Host -f yellow "`t|-------------------------------------|`n`t|" -n; Write-Host -f red "   😲  Access Denied! ABORTING! 🔒   " -n; Write-Host -f yellow "|`n`t+-------------------------------------+`n"; return}
 
 function logoff {# Exit screen.
-nowarning; nomessage; Write-Host -f red "Securing the environment..."; neuralizer; $choice=$null; rendermenu; Write-Host -f white "`n`t`t    ____________________`n`t`t   |  ________________  |`n`t`t   | |                | |`n`t`t   | |   🔒 "-n; Write-Host -f red "Locked." -n; Write-Host -f white "   | |`n`t`t   | |                | |`n`t`t   | |________________| |`n`t`t   |____________________|`n`t`t    _____|_________|_____`n`t`t   / * * * * * * * * * * \`n`t`t  / * * * * * * * * * * * \`n`t`t ‘-------------------------’`n"; return}
+sl $script:startingdirectory; nowarning; nomessage; Write-Host -f red "Securing the environment..."; neuralizer; $choice=$null; rendermenu; Write-Host -f white "`n`t`t    ____________________`n`t`t   |  ________________  |`n`t`t   | |                | |`n`t`t   | |   🔒 "-n; Write-Host -f red "Locked." -n; Write-Host -f white "   | |`n`t`t   | |                | |`n`t`t   | |________________| |`n`t`t   |____________________|`n`t`t    _____|_________|_____`n`t`t   / * * * * * * * * * * \`n`t`t  / * * * * * * * * * * * \`n`t`t ‘-------------------------’`n"; return}
 
 #---------------------------------------------SUPPORT FUNCTIONS------------------------------------
 
@@ -250,8 +256,8 @@ Write-Host -f yellow ("-" * 100); $pattern = "(?ims)^## ($section.*?)(##|\z)"; $
 
 if ($lines.Count -gt 1) {$text = wordwrap $lines[1] 100 | Out-String; $text = $text.TrimEnd("`r", "`n"); Write-Host $text}; Write-Host -f yellow ("-" * 100)}
 
-$scripthelp = Get-Content -Raw -Path $PSCommandPath; $sections = [regex]::Matches($scripthelp, "(?im)^## (.+?)(?=\r?\n)"); $selection = $null
-do {cls; Write-Host "$([System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)) Help Sections:`n" -f cyan; for ($i = 0; $i -lt $sections.Count; $i++) {"{0}: {1}" -f ($i + 1), $sections[$i].Groups[1].Value}
+$scripthelp = (Get-Command paschwordshelpdialogue).ScriptBlock.ToString(); $sections = [regex]::Matches($scripthelp, "(?im)^## (.+?)(?=\r?\n)"); $selection = $null
+do {cls; Write-Host "Paschwords Help Sections:`n" -f cyan; for ($i = 0; $i -lt $sections.Count; $i++) {"{0}: {1}" -f ($i + 1), $sections[$i].Groups[1].Value}
 if ($selection) {scripthelp $sections[$selection - 1].Groups[1].Value}
 Write-Host -f white "`nEnter a section number to view " -n; $input = Read-Host
 if ($input -match '^\d+$') {$index = [int]$input
@@ -1231,9 +1237,9 @@ elseif (-not $validurls) {$outpath = Join-Path $script:databasedir 'searchresult
 default {}}}}
 
 function launchvalidator {# Launch the validator in a separate window.
-$validator = Join-Path $PSScriptRoot "ValidateURLs.ps1"; $file = Join-Path $script:databasedir "validurls.txt"
+$validator = Join-Path $script:basemodulepath "ValidateURLs.ps1"; $file = Join-Path $script:databasedir "validurls.txt"
 Write-Host -f cyan "Do you want to launch " -n; Write-Host -f white "ValidateURLs.ps1" -n; Write-Host -f cyan " in a separate window, to test that each of the URLs listed in " -n; Write-Host -f white "validurls.txt" -n; Write-Host -f cyan " are still active? (Y/N) " -n; $proceed = Read-Host
-if ($proceed -match "^[Yy]") {if (-not (Test-Path $validator)) {$script:warning = "ValidateURLs.ps1 not found at the expected path:`n$PSScriptRoot"; nomessage; return}
+if ($proceed -match "^[Yy]") {if (-not (Test-Path $validator)) {$script:warning = "ValidateURLs.ps1 not found at the expected path:`n$script:basemodulepath"; nomessage; return}
 Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $validator $file -safe `"$script:useragent`"" -WindowStyle Normal; $script:message = "ValidateURLs.ps1 is running in a separate window. Remember to check on it's progress."; nowarning}
 else {$script:warning = "Aborted external URL validation script."; nomessage; return}
 return}
@@ -1720,20 +1726,20 @@ $newWrapSalt = New-Object byte[] 16; [System.Security.Cryptography.RandomNumberG
 $script:message = "Master password rotated successfully."; nowarning; return}
 
 function switchtomasterkey {# Elevate to master-level access to the current DB
-if (-not $script:database) {$script:warning = "❌ No database is currently loaded."; nomessage; return}
+if (-not $script:database) {$script:warning = "❌ No database is currently loaded."; nomessage; return $false}
 
 Write-Host -f green "`n`n👑 Enter the master password " -n; $securePass = Read-Host -AsSecureString
 $script:switchtomaster = $true; $script:rootkey = loadprivilegekey $securePass; $real = New-Object byte[] 32; [Array]::Copy($script:rootkey, $script:rootkey.Length - 32, $real, 0, 32); $script:rootkey = $real; $basename = [System.IO.Path]::GetFileNameWithoutExtension($script:database); $wrappedPath = Join-Path $privilegedir "$basename.dbkey"
-if (-not (Test-Path $wrappedPath)) {$script:warning = "❌ No wrapped database key found for '$basename'. You may need to wrap the database key inside the Master key first."; nomessage; return}
+if (-not (Test-Path $wrappedPath)) {$script:warning = "❌ No wrapped database key found for '$basename'. You may need to wrap the database key inside the Master key first."; nomessage; return $false}
 
 try {$wrapped = [System.IO.File]::ReadAllBytes($wrappedPath); $unwrapped = unprotectbytesaeshmac $wrapped $script:rootkey
 
-if (-not $unwrapped -or $unwrapped.Length -ne 32) {$script:failedmaster++; $script:warning = "❌ Wrong master password. $([math]::Max(0, 4 - $script:failedmaster)) attempts remain before lockout."; nomessage; return}
+if (-not $unwrapped -or $unwrapped.Length -ne 32) {$script:failedmaster++; $script:warning = "❌ Wrong master password. $([math]::Max(0, 4 - $script:failedmaster)) attempts remain before lockout."; nomessage; return $false}
 
 # Load the Master key.
-resetmasterfailures; $script:key = $unwrapped; $script:switchtomaster = $false; loadjson; $script:message = "✅ Privilege elevated. 👑 Now using the unlocked Master key."; nowarning; return}
+resetmasterfailures; $script:key = $unwrapped; $script:switchtomaster = $false; loadjson; $script:message = "✅ Privilege elevated. 👑 Now using the unlocked Master key."; nowarning; return $true}
 
-catch {$script:warning = "❌ Failed to unwrap the database key with the Master key: $_"; nomessage; return}}
+catch {$script:warning = "❌ Failed to unwrap the database key with the Master key: $_"; nomessage; return $false}}
 
 
 #---------------------------------------------MANAGEMENT MENU: ARCHIVE-----------------------------
@@ -1957,7 +1963,7 @@ cls; ""; endcap
 startline; Write-Host -f white " 🔑 Secure Paschwords Manager v$script:version 🔒".padright(52) -n
 if ($script:minutes -ge 99) {[int]$timerdisplay = 99} else {[int]$timerdisplay = $script:minutes +1}
 if ($script:unlocked) {if ($countdown -ge 540) {Write-Host -f green "🔒 in $timerdisplay minutes. " -n}
-elseif ($countdown -lt 540 -and $countdown -ge 60) {Write-Host -f green " 🔒 in $($script:minutes +1) minutes " -n}
+elseif ($countdown -lt 540 -and $countdown -ge 60) {Write-Host -f green " 🔒 in $($script:minutes +1) minutes. " -n}
 elseif ($countdown -lt 60) {Write-Host -f red -n ("      🔒 in 0:{0:D2} " -f $script:seconds)}
 else {Write-Host "`t`t    🔒 "-n}} 
 else {Write-Host "`t`t    🔒 "-n}; linecap
@@ -2223,7 +2229,7 @@ if ($script:key) {rotatemasterpassword; rendermenu}}
 
 'G' {# Grant Master key privileges.
 if (masterlockout) {break}
-switchtomasterkey; rendermenu}
+if (-not (switchtomasterkey)) {$script:rootkey = $null}; rendermenu}
 
 'B' {# Backup current database, key and privilege directory.
 backup
@@ -2367,10 +2373,7 @@ $choice = $null}} while (-not $script:quit)}
 # Initialize and launch.
 login}
 
-Export-ModuleMember -Function paschwords
-
-
-#---------------------------------------------HELP SCREENS-----------------------------------------
+function paschwordshelpdialogue {#---------------------------------------------HELP SCREENS-----------------------------------------
 
 <#
 ## Overview
@@ -2381,8 +2384,6 @@ Here are some useful pieces of information to know:
 Paschwords is an enterprise grade password manager written entirely in PowerShell with no outside dependancies or libraries. It will work on any computer running Windows 10 with PowerShell 5.1 or higher.
 
 Standard users have permissions to view, search, retrieve update and remove individual entries, toggle clipboard, lock and unlock the session and reset the timer. They can also load a different database and key either via the command line, or within the interface. All other features are only granted to privileged users.
-
-It is best practice to save key files somewhere distant from the databases.
 
 The import function is extremely powerful, accepting non-standard fields and importing them as tags, notes, or both. This should make it capable of importing password databases from a wide variety of other password managers, commercial and otherwise. Title, URL and Password fields are mandatory.
 
@@ -2408,7 +2409,7 @@ validhashes.sha256	Known valid versions of the module, kept in the privilege dir
 ## Installation: Module Import & Roll-Back
 On first run, it is recommended to add the line "ipmo paschwords" to your user profile, via the PowerShell command line:
 
-		'ipmo paschwords' | Add-Content -Path $PROFILE
+		'`nipmo paschwords' | Add-Content -Path $PROFILE
 
 Rollback:
 
@@ -2420,6 +2421,19 @@ keys
 logs
 
 If you need to abandon the setup and restart, simply delete these directories and restart the module.
+## Installation: Encrypted Version
+If you're going to use the encrypted version of the Paschwords, in order to protect the module from tampering or being reverse engineered, add the PS1 script as a function to your profile, instead:
+
+'`nfunction startpaschwords {$powershell = Split-Path $profile; & " $powershell\modules\paschwords\paschwords.ps1"}'| Add-Content -Path $PROFILE
+
+Ensure that you've copied the following 2 files into the Paschwords directory and made a backup of Pascwhords.psm1 somewhere that Standard users cannot gain access to it:
+
+EncryptPaschwordsModule.ps1 
+Paschwords.ps1
+
+Then run: "EncryptPaschwordsModule.ps1 paschwords.psm1"
+
+This will prompt you for a password to encrypt the module. Do not lose this. It will need to be entered everytime Paschwords is launched, decrypting the module and executing it exclusively in memory. The script will now ask if you want to delete the Paschwords.psm1 file. Agree. This will ensure that the only copy of the Paschwords module that exists, other than your backup, will be the newly created and entirely unique "paschwords.enc" file that will be initiated by the startpaschwords command you created with the profile function above. You now have a fully encrypted, secure, HMAC, RBAC, enterprise grade password manager at your disposal.
 ## Installation: First Launch
 Once running, press M to switch to the Management menu, which is freely accessible only until proper user accounts have been setup.
 
@@ -2463,9 +2477,7 @@ keydir = 'DefaultPowerShellDirectory\Modules\Paschwords\keys'
 logdir = 'DefaultPowerShellDirectory\Modules\Paschwords\logs'
 privilegedir = 'DefaultPowerShellDirectory\Modules\Paschwords\.privilege'
 ## Paschword Generator: Modes
-When a new entry is added to the database, the user is presented with an option to use the built-in paschword generator, providing users with the ability to create paschwords which meet all typical security requirements, but also features several intelligent mechanisms to build  more useful and memorable paschwords.
-
-By typing a series of options at the design prompt, users can create paschword patterns that meet their preferences. Using a hierarchical model, these option are:
+When a new entry is added to the database, the user is presented with an option to use the built-in paschword generator, providing users with the ability to create paschwords which still meet all typical security requirements. This option features several intelligent mechanisms to build more useful and memorable paschwords by simply selecting a series of options at the design prompt. In hierarchical order, these option are:
 
 • [P]IN: This option supercedes all others and creates a purely numerical paschword, with a minimum character length of 4 and maximum of 16. This conforms to banking standards.
 
@@ -2477,9 +2489,7 @@ By typing a series of options at the design prompt, users can create paschword p
 ## Paschword Generator: Word Derivations
 A few notes about the word derivations:
 
-• All of the options except for PIN will randomize the case of words, so that there should always be a strong mix of upper-case and lower-case letters.
-
-• All 3 of these options will also include at least 1 number.
+• All of the options except for PIN will randomize the case of words, so that there should always be a strong mix of upper-case and lower-case letters and they will all include at least 1 number.
 
 • The 2 options that use the dictionary have a minimum character length of 12, while the PIN and Alphanumeric options have a minimum character length of 4.
 
@@ -2565,9 +2575,7 @@ Sort fields in ascending or descending order:
 
 Available only to privileged users:
 
-• [X]port the current search criteria to a "searchresults.csv" file in the database directory.
-
-The Valid URLs search however, will export to a "validurls.txt" file in the database directory, at which point the user has an option to run the supplementary "ValidateURLs" script.
+• [X]port the current search criteria to a "searchresults.csv" file in the database directory. The Valid URLs search however, will export to a "validurls.txt" file in the database directory, at which point the user has an option to run the supplementary "ValidateURLs" script.
 
 • [ESC] or [Q]uit will return to the main menu.
 ## Menu Options: ValidateURLs.ps1 Supplementary Script
@@ -2658,4 +2666,4 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-##>
+##>}
