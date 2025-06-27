@@ -2422,7 +2422,7 @@ logs
 
 If you need to abandon the setup and restart, simply delete these directories and restart the module.
 ## Installation: Encrypted Version
-If you're going to use the encrypted version of the Paschwords, in order to protect the module from tampering or being reverse engineered, add the PS1 script as a function to your profile, instead:
+If you're going to use the encrypted version of the Paschwords, in order to protect the module from tampering or being reverse engineered, add the paschwords.ps1 script as a function in your profile:
 
 '`nfunction startpaschwords {$powershell = Split-Path $profile; & " $powershell\modules\paschwords\paschwords.ps1"}'| Add-Content -Path $PROFILE
 
