@@ -1,7 +1,7 @@
 # Core module details
 @{
 RootModule = 'Paschwords.psm1'
-ModuleVersion = '4.5'
+ModuleVersion = '4.6'
 GUID = 'd4f71764-0e43-4632-8b35-0f0a79b36f62'
 Author = 'Schvenn'
 CompanyName = 'Plath Consulting Incorporated'
