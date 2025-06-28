@@ -23,7 +23,7 @@ $script:keydir = $config.PrivateData.keydir; $script:defaultkey = $config.Privat
 $script:databasedir = $config.PrivateData.databasedir; $script:defaultdatabase = $config.PrivateData.defaultdatabase; $script:databasedir = $script:databasedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:defaultdatabase = Join-Path $script:databasedir $script:defaultdatabase
 
 # PrivilegeDir & LogDir
-$script:privilegedir = $config.PrivateData.privilegedir; $script:privilegedir = $script:privilegedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:logdir = $config.PrivateData.logdir; $script:logdir = $script:logdir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell)
+$script:privilegedir = $config.PrivateData.privilegedir; $script:privilegedir = $script:privilegedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:logdir = $config.PrivateData.logdir; $script:logdir = $script:logdir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:logkeyfile = Join-Path $privilegedir 'logkey.bin'
 
 # Default User Registry
 $basename = [IO.Path]::GetFileNameWithoutExtension($script:defaultkey); $script:defaultregistry = Join-Path $privilegedir "$basename.db"
@@ -152,7 +152,7 @@ if (-not $script:keyexists -and -not (Test-Path $script:registryfile -ea Silentl
 elseif (-not $script:keyexists) {Write-Host -f white "`n`t`tNo database key present.`n`t"; loginfailed}
 elseif ($script:keyexists) {decryptkey $script:keyfile
 if ($script:key) {if (authenticateuser) {loggedin}}
-else {loginfailed}}}
+else {logauthenticationevents "none" "User failed to unlock database."; loginfailed}}}
 
 function authenticateuser {# User authentication and lockout.
 $maxFailures = 3; $lockoutDuration = [TimeSpan]::FromMinutes(30); $attemptsFilePrefix = ".locked.flag"; $script:standarduser = $false
@@ -164,18 +164,18 @@ if (-not $script:users -or $script:users.Count -eq 0) {Write-Host -f red "`t    
 while ($true) {Write-Host -f green "`t 👤 Username: " -n; $username = Read-Host
 if (-not $username) {Write-Host -f red "`t    Username required."; continue}
 $userEntry = $script:users | Where-Object {$_.data.Username -eq $username}
-if (-not $userEntry) {Write-Host -f red "`t    User not found."; continue}
+if (-not $userEntry) {Write-Host -f red "`t    User not found."; logauthenticationevents "none" "No username provided."; continue}
 
 # Check account active and expiration date
 $expiresDate = [datetime]::ParseExact($userEntry.data.Expires, 'yyyy-MM-dd', $null); $nowDate = (Get-Date).ToUniversalTime().Date
-if (-not $userEntry.data.Active -or $nowDate -gt $expiresDate) {Write-Host -f red "`t    Account expired or inactive.`n"; return $false}
+if (-not $userEntry.data.Active -or $nowDate -gt $expiresDate) {Write-Host -f red "`t    Account expired or inactive.`n"; logauthenticationevents $username "Account expired or inactive."; return $false}
 
 # Lock file path
 $lockFile = Join-Path $privilegedir "$username$attemptsFilePrefix"
 
 # Check lockout
 if (Test-Path $lockFile) {$lastWrite = (Get-Item $lockFile).LastWriteTimeUtc; $elapsed = (Get-Date).ToUniversalTime() - $lastWrite
-if ($elapsed -lt $lockoutDuration) {$remaining = $lockoutDuration - $elapsed; Write-Host -f red "`t    Account locked.`n`t    Try again in $([int]$remaining.TotalMinutes) minutes."; return $false}
+if ($elapsed -lt $lockoutDuration) {$remaining = $lockoutDuration - $elapsed; Write-Host -f red "`t    Account locked.`n`t    Try again in $([int]$remaining.TotalMinutes) minutes."; logauthenticationevents $username "Account locked."; return $false}
 else {Remove-Item $lockFile -ea SilentlyContinue}}
 
 # Track login attempts count
@@ -183,26 +183,27 @@ $failCount = 0
 if (Test-Path $lockFile) {$failCount = [int](Get-Content $lockFile -ea SilentlyContinue)}
 
 while ($true) {Write-Host -f green "`t 🔐 Password: " -n; $securePass = Read-Host -AsSecureString
-if (-not $securePass -or $securePass.Length -eq 0) {Write-Host -f red "`t    Password required."; continue}
+if (-not $securePass -or $securePass.Length -eq 0) {Write-Host -f red "`t    Password required."; logauthenticationevents $username "No password provided."; continue}
 try {$plainPass = [System.Net.NetworkCredential]::new("", $securePass).Password
-if (-not $plainPass) {Write-Host -f red "`t    Password required."; continue}}
-catch {Write-Host -f red "`t    Invalid password input."; continue}
+if (-not $plainPass) {Write-Host -f red "`t    Password required."; logauthenticationevents $username "No password provided."; continue}}
+catch {Write-Host -f red "`t    Invalid password input."; logauthenticationevents $username "Invalid password input."; continue}
 
 $saltAndHash = [Convert]::FromBase64String($userEntry.data.Password); $salt = $saltAndHash[0..15]; $storedHash = $saltAndHash[16..($saltAndHash.Length - 1)]; $derived = [byte[]](derivekeyfrompassword $plainPass $salt); $sha256 = [Security.Cryptography.SHA256]::Create(); $computedHash = $sha256.ComputeHash($derived); $sha256.Dispose()
 
 $match = ($computedHash.Length -eq $storedHash.Length) -and (-not (Compare-Object $computedHash $storedHash))
 if ($match) {if (Test-Path $lockFile) {Remove-Item $lockFile -ea SilentlyContinue}
-$script:standarduser = ($userEntry.data.Role -eq 'standard'); $script:message = "✅ Authentication successful for user '$username'."; $script:loggedinuser = $username; nowarning; return $true}
+$script:standarduser = ($userEntry.data.Role -eq 'standard'); $script:message = "✅ Authentication successful for user '$username'."; logauthenticationevents $username "Successful login."; $script:loggedinuser = $username; nowarning; return $true}
 
 $failCount++; Set-Content -Path $lockFile -Value $failCount; (Get-Item $lockFile).LastWriteTimeUtc = (Get-Date).ToUniversalTime(); $remainingAttempts = $maxFailures - $failCount
-if ($remainingAttempts -le 0) {Write-Host -f red "`t    Account locked.`n`t    Try again in 30 minutes."; return $false}
-Write-Host -f red "`t    Invalid password. $remainingAttempts attempt(s) remaining."}}}
+if ($remainingAttempts -le 0) {Write-Host -f red "`t    Account locked.`n`t    Try again in 30 minutes."; logauthenticationevents $username "Account locked."; return $false}
+Write-Host -f red "`t    Invalid password. $remainingAttempts attempt(s) remaining."; logauthenticationevents $username "Invalid password."}}}
 
 function loginfailed {# Login failed.
 Write-Host -f yellow "`t|-------------------------------------|`n`t|" -n; Write-Host -f red "   😲  Access Denied! ABORTING! 🔒   " -n; Write-Host -f yellow "|`n`t+-------------------------------------+`n"; return}
 
 function logoff {# Exit screen.
 sl $script:startingdirectory; nowarning; nomessage; Write-Host -f red "Securing the environment..."; neuralizer; $choice=$null; rendermenu; Write-Host -f white "`n`t`t    ____________________`n`t`t   |  ________________  |`n`t`t   | |                | |`n`t`t   | |   🔒 "-n; Write-Host -f red "Locked." -n; Write-Host -f white "   | |`n`t`t   | |                | |`n`t`t   | |________________| |`n`t`t   |____________________|`n`t`t    _____|_________|_____`n`t`t   / * * * * * * * * * * \`n`t`t  / * * * * * * * * * * * \`n`t`t ‘-------------------------’`n"; return}
+
 
 #---------------------------------------------SUPPORT FUNCTIONS------------------------------------
 
@@ -265,6 +266,7 @@ if ($index -ge 1 -and $index -le $sections.Count) {$selection = $index}
 else {$selection = $null}} else {return}}
 while ($true); return}
 
+
 #---------------------------------------------HOUSE CLEANING---------------------------------------
 
 function corruptdatabase {# JSON Database overwriting.
@@ -312,6 +314,50 @@ if ($script:quit) {scramble ([ref]$script:message); scramble ([ref]$script:warni
 
 #---------------------------------------------LOGGING----------------------------------------------
 
+function appendhmactologentry ($line) {# Appends a log line with chained HMAC integrity.
+
+# Create a logkeyfile if none exists.
+if (-not (Test-Path $script:logkeyfile)) {$passwordHashFile = Join-Path $privilegedir 'password.hash'; $rootKeyFile = Join-Path $privilegedir 'root.key'
+if (-not (Test-Path $passwordHashFile)) {$script:warning = "Password hash file not found. Secure logging is unavailable."; return}
+if (-not (Test-Path $rootKeyFile)) {$script:warning = "Root key file not found. Secure logging is unavailable."; return}
+
+# Load both files
+$passwordHashBytes = [IO.File]::ReadAllBytes($passwordHashFile); $rootKeyBytes = [IO.File]::ReadAllBytes($rootKeyFile)
+
+# Combine and hash to generate HMAC key
+$combined = New-Object byte[] ($passwordHashBytes.Length + $rootKeyBytes.Length); [Array]::Copy($passwordHashBytes, 0, $combined, 0, $passwordHashBytes.Length); [Array]::Copy($rootKeyBytes, 0, $combined, $passwordHashBytes.Length, $rootKeyBytes.Length)
+
+$sha256 = [Security.Cryptography.SHA256]::Create(); 
+try {$logKey = $sha256.ComputeHash($combined)}
+finally {$sha256.Dispose()}
+
+# Save to disk and assign.
+[IO.File]::WriteAllBytes($script:logkeyfile, $logKey); $script:logHMACKey = $logKey}
+
+# Load logHMACKey
+$script:logHMACKey = [IO.File]::ReadAllBytes($script:logkeyfile)
+
+# If this is the first entry of this session, obtain last known HMAC.
+if (-not $script:lastHMAC) {if (Test-Path $script:logfile) {$lines = Get-Content $script:logfile -Tail 4; $hmacLine = $lines | Where-Object {$_ -like "HMAC:*"} | Select-Object -Last 1
+if ($hmacLine) {$encoded = $hmacLine -replace '^HMAC:\s*', ''
+try {$script:lastHMAC = [Convert]::FromBase64String($encoded)} catch {$script:lastHMAC = [byte[]](0..31)}}
+else {$script:lastHMAC = [byte[]](0..31)}
+
+# Prepend session separator
+$line = "`nNew Session Started`n" + ("-" * 100) + "`n" + $line}
+else {$script:lastHMAC = [byte[]](0..31)}}
+
+# Build chained HMAC.
+$hmac = [System.Security.Cryptography.HMACSHA256]::new($script:logHMACKey); $bytes = [System.Text.Encoding]::UTF8.GetBytes($line) + $script:lastHMAC; $newHMAC = $hmac.ComputeHash($bytes); $hmac.Dispose()
+
+# Format entry.
+$encodedHMAC = [Convert]::ToBase64String($newHMAC); $entry = "$line`nHMAC: $encodedHMAC`n" + ("-" * 100); $script:lastHMAC = $newHMAC
+
+# Write entry with retries
+$retries = 5
+for ($i = 0; $i -lt $retries; $i++) {try {$fs = [System.IO.File]::Open($script:logfile, 'Append', 'Write', 'ReadWrite'); $sw = New-Object System.IO.StreamWriter($fs); $sw.WriteLine($entry); $sw.Close(); $fs.Close(); break}
+catch {Start-Sleep -Milliseconds 100}}}
+
 function logchoices ($choice, $message, $warning){# Log user actions.
 # Do not log if the user has turned off logging.
 if ($script:disablelogging) {return}
@@ -351,6 +397,7 @@ $managementmap = @{'N' = 'Create a [N]ew password database.';
 'X' = 'Remove a user.';
 'M' = '[M]ain Menu.'
 'F4' = 'Toggle logging.';
+'F5' = 'Verify logs.';
 'F10' = 'Modify configuration.';
 'F12' = 'Save and sort database.'}
 
@@ -378,28 +425,107 @@ if (-not (Test-Path $script:logdir)) {New-Item $script:logdir -ItemType Director
 Get-ChildItem -Path $script:logdir -Filter 'log - *.log' | Where-Object {$_.LastWriteTime -lt (Get-Date).AddDays(-[int]$script:logretention)} | Remove-Item -Force
 
 # Create base file each session.
-if (-not $script:logfile) {$timestamp = (Get-Date).ToString('MM-dd-yy @ HH_mm_ss'); $script:logfile = Join-Path $script:logdir "log - $timestamp.log"}
+if (-not $script:logfile) {$timestamp = (Get-Date).ToString('MM-dd-yyyy'); $script:logfile = Join-Path $script:logdir "log - $timestamp.log"}
 
 # Map unknown keys.
-if (-not $activemap.ContainsKey($choice)) {Add-Content -Path $script:logfile -Value "$(Get-Date -Format 'HH:mm:ss') - UNRECOGNIZED: $choice"; return}
+if (-not $activemap.ContainsKey($choice)) {appendhmactologentry "$(Get-Date -Format 'HH:mm:ss') - Unmapped key: $choice"; return}
 
 # Compile entry information.
-$timestamp = Get-Date -Format 'HH:mm:ss'; $info = "$(if ($message) {" - MESSAGE: $logmessage"})$(if ($warning) {" - WARNING: $warning"})"; $entry = "$timestamp - $script:loggedinuser - $($activemap[$choice])$info`n" + ("-" * 100)
+$timestamp = Get-Date -Format 'HH:mm:ss'; $info = "$(if ($message) {" - MESSAGE: $logmessage"})$(if ($warning) {" - WARNING: $warning"})"; appendhmactologentry "$timestamp - $script:loggedinuser - $($activemap[$choice])$info"}
 
-# Ensure log gets written by retrying 5 times for every log, to avoid race conditions.
-$retries = 5
-for ($i = 0; $i -lt $retries; $i++) {try {$fs = [System.IO.File]::Open($script:logfile, 'Append', 'Write', 'ReadWrite'); $sw = New-Object System.IO.StreamWriter($fs)
-$sw.WriteLine($entry); $sw.Close(); $fs.Close(); break}
-catch {Start-Sleep -Milliseconds 100}}}
+function logauthenticationevents ($user, $reason) {# Log authentication events, such as login attempts and results.
+# Create log directory if missing.
+if (-not (Test-Path $script:logdir)) {New-Item $script:logdir -ItemType Directory -Force | Out-Null}
+
+# Initialize session log if needed.
+if (-not $script:logfile) {$timestamp = (Get-Date).ToString('MM-dd-yyyy'); $script:logfile = Join-Path $script:logdir "log - $timestamp.log"}
+
+# Compile entry.
+if ($user -eq "none") {$user = "none @ $([System.Net.Dns]::GetHostName())"}
+$timestamp = Get-Date -Format 'HH:mm:ss'; appendhmactologentry "$timestamp - $user - 🔐 $reason"}
 
 function logcleanup {# Compress log files.
 
 function gziplog ($inputFile, $outputFile = "$inputFile.gz") {$inputStream = [System.IO.File]::OpenRead($inputFile); $outputStream = [System.IO.File]::Create($outputFile); $gzipStream = New-Object System.IO.Compression.GZipStream($outputStream, [System.IO.Compression.CompressionMode]::Compress); $inputStream.CopyTo($gzipStream); $gzipStream.Close(); $inputStream.Close(); $outputStream.Close()}
 
-$today = (Get-Date).Date; Get-ChildItem -Path $script:logdir -Filter 'log - *.log' | Where-Object {$_.Name -match '^log - (\d{2})-(\d{2})-(\d{2}) @'} | Group-Object {if ($_.Name -match '^log - (\d{2})-(\d{2})-(\d{2})') {$mm = $matches[1]; $dd = $matches[2]; $yy = $matches[3]; $fileDate = Get-Date "$mm-$dd-20$yy"
-if ($fileDate -lt $today) {"$mm-$dd-$yy"} else {$null}}} | Where-Object {$_.Name} | ForEach-Object {$date = $_.Name; $output = Join-Path $script:logdir "log - $date.log"; $_.Group | Sort-Object LastWriteTime | ForEach-Object {Get-Content $_.FullName | Add-Content -Path $output}
-$_.Group | ForEach-Object {Remove-Item $_.FullName -Force}
-gziplog $output; Remove-Item $output -Force}}
+$today = (Get-Date).Date; Get-ChildItem -Path $script:logdir -Filter 'log - *.log' | Where-Object {$_.Name -match '^log - (\d{2})-(\d{2})-(\d{4})\.log$'} | Where-Object {$mm = $matches[1]; $dd = $matches[2]; $yyyy = $matches[3]; $fileDate = Get-Date "$mm/$dd/$yyyy"; $fileDate -lt $today} | ForEach-Object {$logFile = $_.FullName; gziplog $logFile; Remove-Item $logFile -Force}}
+
+function verifylogs {# Validate logs HMAC values.
+# Prompt for modes.
+Write-Host -f yellow "`n`nDisplay verbose results? (Y/N) " -n; $answer = Read-Host; $verbose = $false
+if ($answer -match '^[Yy]$') {$verbose = $true}; $answer = $null
+
+Write-Host -f yellow "Check all available logs? (Y/N) " -n; $answer = Read-Host; $all = $true
+if ($answer -match '^[Nn]$') {$all = $false}; $answer = $null
+if (-not $all) {Write-Host -f yellow "Enter a start date (MM-DD-YYYY) " -n; $startdate = Read-Host
+Write-Host -f yellow "Enter an end (MM-DD-YYYY) " -n; $enddate = Read-Host
+try {$startdate = [datetime]::ParseExact($startdate, 'MM-dd-yyyy', $null)} catch {$startdate = (Get-Date).AddDays(-30)}
+try {$enddate = [datetime]::ParseExact($enddate, 'MM-dd-yyyy', $null)} catch {$enddate = Get-Date}}
+""
+
+# Error-checking.
+if (-not $script:logHMACKey -and (Test-Path $script:logkeyfile)) {$script:logHMACKey = [IO.File]::ReadAllBytes($script:logkeyfile)}
+if (-not $script:logHMACKey) {Write-Host -f Red "❌ No HMAC key available. Cannot verify logs."; return}
+
+# Calculate HMAC.
+function newhmac($data, [byte[]]$prevHMAC) {$hmac = [System.Security.Cryptography.HMACSHA256]::new($script:logHMACKey); $bytes = [Text.Encoding]::UTF8.GetBytes($data) + $prevHMAC; $result = $hmac.ComputeHash($bytes); $hmac.Dispose(); return $result}
+
+# File handling.
+$lines = @(); $issues = @(); $logs = Get-ChildItem $script:logdir | Where-Object {$_.Extension -in '.log', '.gz'}
+if (-not $all) {$logs = $logs | Where-Object {if ($_ -match 'log - (\d{2})-(\d{2})-(\d{4})\.log(\.gz)?$') {$logdate = [datetime]::ParseExact("$($matches[1])-$($matches[2])-$($matches[3])", 'MM-dd-yyyy', $null); return ($logdate -ge $startdate -and $logdate -le $enddate)}
+else {return $false}}}
+$logs | ForEach-Object {$file = $_.FullName; Write-Host -f yellow ("-" * 100); Write-Host -f yellow "`n`t`t📁 Checking: " -n; Write-Host -f white "$($_.Name)`n"
+
+# GZip handling.
+if ($file -like '*.gz') {try {$stream = [IO.Compression.GzipStream]::new([IO.File]::OpenRead($file), [IO.Compression.CompressionMode]::Decompress); $reader = New-Object IO.StreamReader($stream)
+while (-not $reader.EndOfStream) {$lines += $reader.ReadLine()}
+if ($lines.Count -gt 0 -and $lines[0] -notmatch '^-{20,}\s*$') {$lines = @('-' * 100) + $lines}
+$reader.Close(); $stream.Close()}
+catch {Write-Host -f Red "❌ Failed to read $file"; return}}
+
+# Plaintext handling.
+else {$lines = Get-Content $file
+if ($lines.Count -gt 0 -and $lines[0] -notmatch '^-{20,}\s*$') {$lines = @('-' * 100) + $lines}}
+
+# Collect results.
+$entries = @(); $i = 0; $skipNextAsFirst = $false
+
+# Skip dashed → empty → dashed entries.
+while ($i -lt $lines.Count) {if ($lines[$i] -match '^-{20,}\s*$') {if ($i + 2 -lt $lines.Count -and $lines[$i+1] -match '^\s*$' -and $lines[$i+2] -match '^-{20,}\s*$') {$i += 2; continue}
+
+# Skip New Session Started entries.
+if ($i + 3 -lt $lines.Count -and $lines[$i+1] -match '^\s*$' -and $lines[$i+2] -match 'New Session Started' -and $lines[$i+3] -match '^-{20,}\s*$') {$i += 3; $skipNextAsFirst = $true; continue}
+elseif ($i + 2 -lt $lines.Count -and $lines[$i+1] -match 'New Session Started' -and $lines[$i+2] -match '^-{20,}\s*$') {$i += 2; $skipNextAsFirst = $true; continue}
+$j = $i + 1; $block = @(); $hmacLine = $null
+while ($j -lt $lines.Count -and $lines[$j] -notmatch '^-{20,}\s*$') {if ($lines[$j] -match '^\s*HMAC:\s*') {$hmacLine = $lines[$j]} else {$block += $lines[$j]}
+$j++}
+
+if ($block.Count -gt 0 -or $hmacLine) {$entries += [PSCustomObject]@{Start = $i + 1; Lines = $block; HMAC  = $hmacLine; Neutral = $skipNextAsFirst}}
+$skipNextAsFirst = $false; $i = $j}
+else {$i++}}
+
+# Validate entries.
+$lastValidHMAC = [byte[]](0..31 | ForEach-Object {0})
+foreach ($entry in $entries) {$data = $entry.Lines -join "`n"; $hmacEncoded = if ($entry.HMAC) {$entry.HMAC -replace '^\s*HMAC:\s*', ''} else {$null}; $status = ""; $neutral = $entry.Neutral
+if (-not $hmacEncoded) {$status = "⚠️"; $issues += "HMAC missing at $($entry.Start) in file $($_.Name)"}
+else {try {$decodedHMAC = [Convert]::FromBase64String($hmacEncoded); $calculatedHMAC = newhmac $data $lastValidHMAC
+if (comparebytearrays $decodedHMAC $calculatedHMAC) {$status = "✅"}
+else {if ($neutral -or $entry -eq $entries[0]) {$status = "⚪"}
+else {$status = "❌"; $issues += "HMAC mismatch at line $($entry.Start) in file $($_.Name)"}}
+$lastValidHMAC = $decodedHMAC}
+catch {$status = "⚠️"; $issues += "Invalid HMAC format at line $($entry.Start) in file $($_.Name)"}}
+
+# Display entries.
+if (-not $verbose -and ($status -eq "⚪" -or $status -eq "✅")) {continue}
+else {$displaydata = $data -replace '[`n]+$', ''
+Write-Host -f yellow ("-" * 100); Write-Host -f yellow "$status Line $($entry.Start): " -n; Write-Host -f white "$displaydata`nHMAC: $hmacEncoded"}}}
+
+# Display final results.
+Write-Host -f yellow ("-" * 100)
+if ($issues.Count -eq 0) {Write-Host -f Green "`n✅ All logs verified successfully."}
+else {Write-Host -f Yellow "`n⚠️ Issues found:`n"; $issues | ForEach-Object {Write-Host -f Red "$_"}}
+
+Write-Host -f White "`n↩️[RETURN] " -n; Read-Host}
 
 
 #---------------------------------------------MASTER PASSWORD FUNCTIONS----------------------------
@@ -509,7 +635,7 @@ if ($raw.Length -lt 112) {$script:warning = "Key file is too short or malformed.
 [byte[]]$salt = $raw[0..15]; [byte[]]$encKey = $raw[16..($raw.Length - 1)]
 
 # Prompt for password
-Write-Host -ForegroundColor Green "`n`t 🔐 Database Password: " -n; $secureMaster = Read-Host -AsSecureString; $plainMaster = [System.Net.NetworkCredential]::new("", $secureMaster).Password; $secureMaster.Dispose()
+Write-Host -f Green "`n`t 🔐 Database Password: " -n; $secureMaster = Read-Host -AsSecureString; $plainMaster = [System.Net.NetworkCredential]::new("", $secureMaster).Password; $secureMaster.Dispose()
 
 try {$wrapKey = derivekeyfrompassword -Password $plainMaster -Salt $salt; [byte[]]$decrypted = unprotectbytesaeshmac $encKey $wrapKey
 if (-not $decrypted -or $decrypted.Length -lt 36) {$script:warning = "Decryption failed or the result was too short."; $script:key = $null; $script:keyfile = $null; $script:database = $null; nomessage; return}
@@ -1601,6 +1727,7 @@ $lines += "}}"
 # Save new file
 Set-Content -Path $configpath -Value $lines -Encoding UTF8; Write-Host -f green "`nConfiguration updated successfully."; initialize; return}
 
+
 #---------------------------------------------MANAGEMENT MENU: MASTER PASSWORD---------------------
 
 function rewrapdbkey {# Re-encrypt the current DB key under a new child key.
@@ -1941,6 +2068,7 @@ if ($confirm -match '^[Yy]') {$script:users = @($script:users | Where-Object {$_
 saveregistry; $script:message = "✅ User '$username' removed."; nowarning; return}
 else {$script:warning = "Aborted."; nomessage; return}}
 
+
 #---------------------------------------------MENU DISPLAY-----------------------------------------
 
 function rendermenu {# Dynamically display menus.
@@ -2262,6 +2390,9 @@ if ($script:keyfile -match '\\([^\\]+)$') {$shortkey = $matches[1]}
 if ($script:disablelogging -eq $true) {$script:warning = "Logging is already turned off for $shortkey."; nomessage; rendermenu; break}
 elseif ($script:disablelogging -eq $false) {$script:disablelogging = $true; $script:warning = "Logging temporarily turned off for $shortkey @ $(Get-Date)"; nomessage; rendermenu}}
 
+'F5' {# Verify Logs
+verifylogs; nowarning; nomessage; rendermenu}
+
 'F10' {# Modify PSD1 configuration.
 ""; decryptkey $script:keyfile
 if ($script:unlocked) {modifyconfiguration; $script:database = $script:defaultdatabase; $script:keyfile = $script:defaultkey; Write-Host -f yellow "Reloading default key and database."; decryptkey $script:keyfile
@@ -2370,8 +2501,10 @@ default {if ($choice.length -gt 0) {}}}
 $script:sessionstart = Get-Date
 $choice = $null}} while (-not $script:quit)}
 
+
 # Initialize and launch.
 login}
+
 
 function paschwordshelpdialogue {#---------------------------------------------HELP SCREENS-----------------------------------------
 
@@ -2592,6 +2725,7 @@ Standard Users:
 Privileged Users:
 
 • [F4] Disable logging. Logging will be reenabled when any key is reloaded/unlocked.
+• [F5] Verify logs. Browse logs for HMAC valdiation in order to find tampering.
 • [F10] Modify PSD1 configuration file.
 • [F12] Sort by Name and then Tag and resave the database.
 ## Menu Options: Management Menu
