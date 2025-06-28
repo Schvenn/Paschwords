@@ -17,6 +17,7 @@ A secure PowerShell module to manage and protect your passwords with industry-gr
     • Comprehensive, timestamped activity logs record both standard and administrative user actions.
 
     • v4.5 introduces at rest encryption and compression for the module. By using a loader script, the module is decrypted and executed exclusively in memory, providing one more layer of security.
+    • v4.6 introduces chained HMAC logs, log validation function and improved authentication logging.
 
     Usage: pwmanage <database.pwdb> <keyfile.key> -noclip
 
