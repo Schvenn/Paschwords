@@ -1,5 +1,5 @@
 # Paschwords
-A secure PowerShell module to manage and protect your passwords with industry-grade cryptography and integrity verification.
+A secure SOC-2 compliant PowerShell module to manage and protect your passwords with industry-grade cryptography and integrity verification.
 
     • Database passwords are secured via PBKDF2-based key derivation, salted and hashed with SHA-256, but are never stored.
     • Master passwords are secured similarly using PBKDF2 with salt and SHA-256 hashing, and validated via a separate authentication mechanism.
