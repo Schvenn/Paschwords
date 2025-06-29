@@ -887,9 +887,14 @@ $script:jsondatabase += $entry; savetodisk}
 function paschwordgenerator ($design, [switch]$regenerate) {# Create an intuitive password
 $specialChars = '~!@#$%^&*_+=.,;:-'.ToCharArray(); $superSpecialChars = '(){}[]'.ToCharArray(); $leetMap = @{'a' = @('@','4'); 'e' = @('3'); 'h' = @('#'); 'l' = @('1','7','!'); 'o' = @('0'); 's' = @('5','$')}
 
+function loaddictionary ($file) {if ($file -like '*.gz') {$stream = [IO.File]::OpenRead($file); $gzip = New-Object IO.Compression.GzipStream($stream, [IO.Compression.CompressionMode]::Decompress); $reader = New-Object IO.StreamReader($gzip); $lines = @()
+while (-not $reader.EndOfStream) {$lines += $reader.ReadLine()}
+$reader.Close(); $gzip.Close(); $stream.Close(); return $lines}
+else {return Get-Content $file}}
+
 # Load dictionary.
 if (-not $script:dictionaryWords) {if (-not (Test-Path $script:dictionaryfile)) {throw "Dictionary file not found: $script:dictionaryfile"}
-$script:dictionaryWords = Get-Content -Path $script:dictionaryfile | Where-Object {$_.Trim().Length -gt 0}}
+$script:dictionaryWords = loaddictionary $script:dictionaryfile | Where-Object {$_.Trim().Length -gt 0}}
 
 # Present user options.
 if (-not $regenerate) {Write-Host ""
