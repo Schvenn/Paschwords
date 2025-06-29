@@ -4,7 +4,7 @@ Installation: Encrypted Version
 If you're going to use the encrypted version of the Paschwords, in order to protect the module from
 tampering or being reverse engineered, add the paschwords.ps1 script as a function in your profile:
 
-    '`nfunction startpaschwords {$powershell = Split-Path $profile; & " $powershell\modules\paschwords\paschwords.ps1"}'| Add-Content -Path $PROFILE
+    '`nfunction startpaschwords {$powershell = Split-Path $profile; & "$powershell\modules\paschwords\paschwords.ps1" @args}'| Add-Content -Path $PROFILE
 
 Ensure that you've copied the following 2 files into the Paschwords directory and made a backup of
 Pascwhords.psm1 somewhere that Standard users cannot gain access to it:
