@@ -46,5 +46,9 @@ $ms = [System.IO.MemoryStream]::new($plaintextBytes); $gzip = [System.IO.Compres
 while (($read = $gzip.Read($buffer, 0, $buffer.Length)) -gt 0) {$out.Write($buffer, 0, $read)}
 $gzip.Close(); [byte[]]$decompressed = $out.ToArray(); $code = [System.Text.Encoding]::UTF8.GetString($decompressed)
 
-# Run Paschwords.
-&{Invoke-Expression $code; paschwords -database $database -keyfile $keyfile -noclip:$noclip -notime:$notime}; $password = $null; $key = $null; ""}
+# Build command line and run Paschwords.
+
+$cmd = "paschwords -database `"$database`" -keyfile `"$keyfile`""
+if ($noclip) {$cmd += " -noclip"}
+if ($notime) {$cmd += " -notime"}
+& {Invoke-Expression $code; Invoke-Expression $cmd}; $password = $null; $key = $null; ""}
