@@ -55,7 +55,7 @@ A setup wizard and full help text is provided inline.
     # Core module details
     @{
     RootModule = 'Paschwords.psm1'
-    ModuleVersion = '4.6'
+    ModuleVersion = '4.61'
     GUID = 'd4f71764-0e43-4632-8b35-0f0a79b36f62'
     Author = 'Schvenn'
     CompanyName = 'Plath Consulting Incorporated'
@@ -78,7 +78,7 @@ A setup wizard and full help text is provided inline.
     timeoutseconds = '900'
     defaultkey = 'paschwords.key'
     useragent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
-    dictionaryfile = 'common.dictionary'
+    dictionaryfile = 'common.dictionary.gz'
     logdir = 'DefaultPowerShellDirectory\Modules\Paschwords\logs'
     timetobootlimit = '60'
     defaultdatabase = 'paschwords.pwdb'
