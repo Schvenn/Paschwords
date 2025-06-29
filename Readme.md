@@ -87,3 +87,5 @@ A setup wizard and full help text is provided inline.
 The script checks itself against a set of valid SHA256 hashes to ensure the file has not been modified.
 A script "CheckNTPTime.ps1", ensures the system time hasn't been tampered with, in order to avoid user account expirations.
 Another separate script "ValidateURLs.ps1" is included to test a file containing a list of URLs for connectivity. This is designed to be used with the Valid URLs search and export function within the module, but I am keeping it separate in order to ensure the Paschword manager remains completely offline and thereby limits its security exposure.
+
+https://www.powershellgallery.com/packages/Paschwords/4.61
