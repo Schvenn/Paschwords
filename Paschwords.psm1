@@ -1681,56 +1681,35 @@ $script:users += $entry
 saveregistry; $script:message = "✅ The new database environment has been created: a keyfile, database, and user registry with the default admin user."; nowarning}
 
 function modifyconfiguration {# Modify the PSD1 configuration.
-# Load current settings
-$manifest = Import-PowerShellDataFile -Path $configpath
-$config = $manifest.PrivateData
+# Load and parse
+$rawLines = Get-Content -Raw -Path $configpath -Encoding UTF8 -ErrorAction Stop -Force; $manifest = Import-PowerShellDataFile -Path $configpath; $config = $manifest.PrivateData; $lines = $rawLines -split "`n"
 
-# Define editable keys with constraints
+# Editable config
 $editable = @{defaultkey = @{desc='Key filename'; validate={param($v) $v -match '\S'}}
-defaultdatabase = @{desc='Database filename'; validate={param($v) $v -match '\S'}}
+defaultdatabase= @{desc='Database filename'; validate={param($v) $v -match '\S'}}
 keydir = @{desc='Key directory path'; validate={param($v) $v -match '\S'}}
 databasedir = @{desc='Database directory path'; validate={param($v) $v -match '\S'}}
 timeoutseconds = @{desc='Timeout (max 5940 seconds)'; validate={param($v) try {($v -as [int]) -in 1..5940} catch {$false}}}
-timetobootlimit = @{desc='Boot time limit (max 120 minutes)'; validate={param($v) try {($v -as [int]) -in 1..120} catch {$false}}}
+timetobootlimit= @{desc='Boot time limit (max 120 minutes)'; validate={param($v) try {($v -as [int]) -in 1..120} catch {$false}}}
 delayseconds = @{desc='Clipboard delay (in seconds)'; validate={param($v) try {[int]$v -ge 0} catch {$false}}}
 expirywarning = @{desc='Password expiry (1–365 days)'; validate={param($v) try {($v -as [int]) -in 1..365} catch {$false}}}
 logretention = @{desc='Log retention (min 30 days)'; validate={param($v) try {[int]$v -ge 30} catch {$false}}}
 dictionaryfile = @{desc='Dictionary filename'; validate={param($v) $v -match '\S'}}
-backupfrequency = @{desc='Backup frequency (in days)'; validate={param($v) try {[int]$v -ge 1} catch {$false}}}
+backupfrequency= @{desc='Backup frequency (in days)'; validate={param($v) try {[int]$v -ge 1} catch {$false}}}
 archiveslimit = @{desc='Archives limit (files to retain)'; validate={param($v) try {[int]$v -ge 1} catch {$false}}}
 useragent = @{desc='User-Agent'; validate={param($v) $v -match '\S'}}}
 
-Write-Host -f yellow "`n`nCurrent Configuration:`n"; $i = 0
-Write-Host -f cyan "There are currently $($editable.count) configurable items in v$script:version.`n"
-foreach ($key in $editable.Keys) {$current = $config[$key]; $i++
-Write-Host -f white "$i. $($editable[$key].desc) [$key = '$current']: " -n; $input = Read-Host
+# Display current config
+Write-Host -f yellow "`n`nCurrent Configuration:`n"; $i = 0; Write-Host -f cyan "There are currently $($editable.count) configurable items in v$script:version.`n"
+foreach ($key in $editable.Keys) {$current = $config[$key]; $i++; Write-Host -f white "$i. $($editable[$key].desc) [$key = '$current']: " -n; $input = Read-Host
 if ($input -ne '') {if (-not (& $editable[$key].validate $input)) {Write-Host -f red "Invalid value for $key. Keeping existing value."}
 else {$config[$key] = "$input"; Write-Host -f green "$key updated to '$input'"}}}
 
-# Rebuild psd1 content
-# Save new file with predictable key order
-$lines = @(); $lines += "# Core module details`n@{"
+# Replace config values in the original file content
+foreach ($key in $editable.Keys) {$pattern = "$key\s*=\s*'.*?'"; $replacement = "$key = '$($config[$key])'"; $lines = $lines -replace $pattern, $replacement}
 
-# Desired order for top-level keys
-$topKeys = 'RootModule','ModuleVersion','GUID','Author','CompanyName','Copyright','Description'
-foreach ($k in $topKeys) {if ($manifest.ContainsKey($k)) {$v = $manifest[$k]
-if ($v -is [string]) {$lines += "$k = '$v'"}
-elseif ($v -is [array]) {$lines += "$k = @('" + ($v -join "', '") + "')"}
-else {$lines += "$k = $v"}}}
-
-# Handle all remaining non-PrivateData keys not in topKeys
-foreach ($k in $manifest.Keys | Where-Object {$_ -notin $topKeys -and $_ -ne 'PrivateData'}) {$v = $manifest[$k]
-if ($v -is [string]) {$lines += "$k = '$v'"}
-elseif ($v -is [array]) {$lines += "$k = @('" + ($v -join "', '") + "')"}
-else {$lines += "$k = $v"}}
-
-# Append PrivateData block
-$lines += "`n# Configuration data"; $lines += "PrivateData = @{"
-foreach ($sk in $config.Keys) {$sv = $config[$sk]; $lines += "$sk = '$sv'"}
-$lines += "}}"
-
-# Save new file
-Set-Content -Path $configpath -Value $lines -Encoding UTF8; Write-Host -f green "`nConfiguration updated successfully."; initialize; return}
+# Save without touching anything else
+Set-Content -Path $configpath -Value ($lines -join "`n") -Encoding UTF8; Write-Host -f green "`nConfiguration updated successfully."; initialize; return}
 
 
 #---------------------------------------------MANAGEMENT MENU: MASTER PASSWORD---------------------
