@@ -19,7 +19,7 @@ PSData = @{
 Tags = @('aes','clipboard','cybersecurity','encryption','hmac','manager','password','rbac','security')
 LicenseUri = 'https://github.com/Schvenn/Secure/blob/main/license.txt'
 ProjectUri = 'https://github.com/Schvenn/Secure'
-ReleaseNotes = 'Full AES password management system with secure storage, clipboard integration, and logging.'
+ReleaseNotes = 'Full AES password management system with secure storage, clipboard integration, HMAC validation, RBAC mechanisms, brute force protection and full event and authentication logging.'
 }
 
 delayseconds = '30'
