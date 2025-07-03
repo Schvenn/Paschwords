@@ -26,7 +26,7 @@ If no database/keyfile are specified, the defaults "paschwords.pwdb" and "paschw
 
 When a password is retrieved, it will automatically be copied to the clipboard for 30 seconds, unless the -noclip option is used at launch time.
 
-You can configure and number of options by modifying the entries in the "Paschwords.psd1" file located in the same directory as the module, or by using F9 to view and F10 to edit these configuration items.
+You can configure a number of options by modifying the entries in the "Paschwords.psd1" file located in the same directory as the module, or by using F9 to view and F10 to edit these configuration items.
 
 Expiration dates only present the entries in a separate browse entries screen for easy identification. No changes are made to the entries.
 
