@@ -23,10 +23,10 @@ $script:keydir = $config.PrivateData.keydir; $script:defaultkey = $config.Privat
 $script:databasedir = $config.PrivateData.databasedir; $script:defaultdatabase = $config.PrivateData.defaultdatabase; $script:databasedir = $script:databasedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:defaultdatabase = Join-Path $script:databasedir $script:defaultdatabase
 
 # PrivilegeDir & LogDir
-$script:privilegedir = $config.PrivateData.privilegedir; $script:privilegedir = $script:privilegedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:logdir = $config.PrivateData.logdir; $script:logdir = $script:logdir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:logkeyfile = Join-Path $privilegedir 'logkey.bin'
+$script:privilegedir = $config.PrivateData.privilegedir; $script:privilegedir = $script:privilegedir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:logdir = $config.PrivateData.logdir; $script:logdir = $script:logdir -replace 'DefaultPowerShellDirectory', [regex]::Escape($powershell); $script:logkeyfile = Join-Path $privilegedir 'logs.dat'
 
 # Default User Registry
-$basename = [IO.Path]::GetFileNameWithoutExtension($script:defaultkey); $script:defaultregistry = Join-Path $privilegedir "$basename.db"
+$basename = [IO.Path]::GetFileNameWithoutExtension($script:defaultkey); $script:defaultregistry = Join-Path $privilegedir "$basename.users"
 
 # Create all necessary directories, if they don't already exist.
 if (-not (Test-Path $script:keydir)) {New-Item -ItemType Directory -Path $script:keydir -Force | Out-Null}
@@ -59,10 +59,10 @@ $script:archiveslimit = $config.PrivateData.archiveslimit
 $script:useragent = $config.PrivateData.useragent
 
 # Initialize privilege settings.
-$script:rootkeyFile = "$privilegedir\root.key"; $script:rootkey = $null; $script:hashFile = "$privilegedir\password.hash"
+$script:rootkeyFile = "$privilegedir\parent.dat0"; $script:rootkey = $null; $script:hashFile = "$privilegedir\primary.dat"
 
 # Obtain verify hashes.
-$encodedscript = Resolve-Path 'Paschwords.enc' -ea SilentlyContinue; $modulescript = Resolve-Path 'Paschwords.psm1' -ea SilentlyContinue
+$encodedscript = Resolve-Path 'Paschwords.data' -ea SilentlyContinue; $modulescript = Resolve-Path 'Paschwords.psm1' -ea SilentlyContinue
 $thisscript = if ($script:basemodulepath -and (Test-Path $modulescript -ea SilentlyContinue)) {$modulescript} elseif (Test-Path $encodedscript -ea SilentlyContinue) {$encodedscript}
 else {Write-Host -f red "`nNo valid script file found in order to validate hash.`n"}
 $script:thisscript = (Get-FileHash -Algorithm SHA256 -Path $thisscript).Hash; $hashcheck = $true; $script:ntpscript = (Get-FileHash -Algorithm SHA256 -Path $script:basemodulepath\CheckNTPTime.ps1).Hash
@@ -93,15 +93,15 @@ if (-not $script:keyfile -or -not (Test-Path $script:keyfile -ea SilentlyContinu
 
 # Set user registry to the keyfile basename, if it exists.
 if (-not $keyfile) {$script:registryfile = $script:defaultregistry}
-if ($keyfile) {$providedkeyname = [IO.Path]::GetFileNameWithoutExtension($keyfile); $script:registryfile = Join-Path $privilegedir "$providedkeyname.db"}
+if ($keyfile) {$providedkeyname = [IO.Path]::GetFileNameWithoutExtension($keyfile); $script:registryfile = Join-Path $privilegedir "$providedkeyname.users"}
 
 # Set to null if nothing if neither exists.
 if (-not (Test-Path $script:keyfile -ea SilentlyContinue) -and -not (Test-Path $script:defaultkey -ea SilentlyContinue)) {$script:keyexists = $false; $script:keyfile = $null; $script:registryfile = $null; $script:database = $null}}
 
 function verify {# Check the current time and current file hash against all valid versions.
-$hashfile = Join-Path $script:privilegedir 'validhashes.sha256'
+$hashfile = Join-Path $script:privilegedir 'valid.versions'
 
-if (-not (Test-Path $hashfile -ea SilentlyContinue)) {Write-Host -f red "`n`t  WARNING: " -n; Write-Host -f white "Hash file not found. Cannot`n`t  verify script integrity. Unless this`n`t  is a fresh install, do not proceed.`n`n`t  For safety reasons, please download`n`t  and copy the validhashes.sha256 file`n`t  into your privilege directory."; Write-Host -f red "`n`t  First stage of validation failed."}
+if (-not (Test-Path $hashfile -ea SilentlyContinue)) {Write-Host -f red "`n`t  WARNING: " -n; Write-Host -f white "Hash file not found. Cannot`n`t  verify script integrity. Unless this`n`t  is a fresh install, do not proceed.`n`n`t  For safety reasons, please download`n`t  and copy the valid.versions file`n`t  into your privilege directory."; Write-Host -f red "`n`t  First stage of validation failed."}
 
 else {$validHashes = Get-Content $hashfile | ForEach-Object {$_.Trim()} | Where-Object {$_ -ne ''}
 if ($validHashes -notcontains $script:thisscript) {Write-Host -f red "`nWARNING: " -n; Write-Host -f yellow "This script has been tampered with. Do not trust it!`n"; return $false}
@@ -317,7 +317,7 @@ if ($script:quit) {scramble ([ref]$script:message); scramble ([ref]$script:warni
 function appendhmactologentry ($line) {# Appends a log line with chained HMAC integrity.
 
 # Create a logkeyfile if none exists.
-if (-not (Test-Path $script:logkeyfile)) {$passwordHashFile = Join-Path $privilegedir 'password.hash'; $rootKeyFile = Join-Path $privilegedir 'root.key'
+if (-not (Test-Path $script:logkeyfile)) {$passwordHashFile = Join-Path $privilegedir 'primary.dat'; $rootKeyFile = Join-Path $privilegedir 'parent.dat0'
 if (-not (Test-Path $passwordHashFile)) {$script:warning = "Password hash file not found. Secure logging is unavailable."; return}
 if (-not (Test-Path $rootKeyFile)) {$script:warning = "Root key file not found. Secure logging is unavailable."; return}
 
@@ -530,7 +530,7 @@ Write-Host -f White "`n↩️[RETURN] " -n; Read-Host}
 
 #---------------------------------------------MASTER PASSWORD FUNCTIONS----------------------------
 
-function initializeprivilege ([byte[]]$Key, [string]$Master) {# Generate root.key from child key and protect it with a master password.
+function initializeprivilege ([byte[]]$Key, [string]$Master) {# Generate parent.dat0 from child key and protect it with a master password.
 if ($Key -and $Key.GetType().Name -ne 'Byte[]') {$script:warning += "❌ Key is not a byte array. Received: $($Key.GetType().FullName) "; nomessage; return}
 
 if (-not $Key) {if (-not (Test-Path $script:keyfile)) {$script:warning += "Cannot initialize privileges: $script:keyfile does not exist. "; nomessage; return}
@@ -555,7 +555,7 @@ $Master = [System.Net.NetworkCredential]::new("", $secure1).Password}
 
 if (Test-Path $rootKeyFile) {$script:warning += "Privilege system already initialized. "; nomessage; return}
 
-# Wrap the child key into root.key using a new random salt.
+# Wrap the child key into parent.dat0 using a new random salt.
 $wrapSalt = New-Object byte[] 16; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($wrapSalt); $wrapKey = derivekeyfrompassword -Password $Master -Salt $wrapSalt; $encRoot = protectbytesaeshmac $Key $wrapKey; New-Item -ItemType Directory -Force -Path $privilegedir | Out-Null
 
 [IO.File]::WriteAllBytes($rootKeyFile, $wrapSalt + $encRoot)
@@ -563,7 +563,7 @@ $wrapSalt = New-Object byte[] 16; [System.Security.Cryptography.RandomNumberGene
 # Generate verification hash to validate the master password.
 $verifSalt = New-Object byte[] 16; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($verifSalt); $verifKey = derivekeyfrompassword -Password $Master -Salt $verifSalt; $hash = [System.Security.Cryptography.SHA256]::Create().ComputeHash($verifKey); [System.IO.File]::WriteAllBytes($hashFile, $verifSalt + $hash)
 
-# Confirm the root.key is functional.
+# Confirm the parent.dat0 is functional.
 if (-not (verifymasterpassword $Master)) {$script:warning += "❌ Initialization failed: unable to verify the master password after creation. "; nomessage; return}
 
 $script:message += "Master password and privilege key initialized with random salt."; nomessage; rendermenu; return}
@@ -697,7 +697,7 @@ $script:jsondatabase = $jsonText | ConvertFrom-Json; $script:message = "📑 Dat
 catch {$script:warning = "Failed to load the database: $_"; nomessage; return}}
 
 function loadregistry {# Load the user registry.
-if ($script:keyfile) {$providedkeyname = [IO.Path]::GetFileNameWithoutExtension($script:keyfile); $script:registryfile = Join-Path $privilegedir "$providedkeyname.db"; if (-not ($script:users -is [System.Collections.IEnumerable])) {$script:users = @()}}
+if ($script:keyfile) {$providedkeyname = [IO.Path]::GetFileNameWithoutExtension($script:keyfile); $script:registryfile = Join-Path $privilegedir "$providedkeyname.users"; if (-not ($script:users -is [System.Collections.IEnumerable])) {$script:users = @()}}
 if (-not (Test-Path $script:registryfile -ea SilentlyContinue)) {$script:users = @(); $script:warning = "User registry not found."; nomessage return}
 if (-not $script:key) {$script:registryfile = $null; $script:users = @(); $script:warning = "You must have a key loaded, in order to load a user registry."; nomessage; return}
 
@@ -736,7 +736,7 @@ catch {$script:warning = "❌ Failed to save updated database: $_"; nomessage; r
 function saveregistry {# Save the user registry.
 if (-not ($script:users -is [System.Collections.IEnumerable])) {$script:users = @()}
 if (-not $script:key) {$script:registryfile = $null; script:users = @(); $script:warning = "You must have a key loaded, in order to modify a user registry."; nomessage; return}
-if ($script:keyfile) {$providedkeyname = [IO.Path]::GetFileNameWithoutExtension($script:keyfile); $script:registryfile = Join-Path $privilegedir "$providedkeyname.db"}
+if ($script:keyfile) {$providedkeyname = [IO.Path]::GetFileNameWithoutExtension($script:keyfile); $script:registryfile = Join-Path $privilegedir "$providedkeyname.users"}
 
 if (-not $script:users) {$script:users = @()}
 try {$json = $script:users | ConvertTo-Json -Depth 5 -Compress; $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
@@ -1647,7 +1647,7 @@ $script:jsondatabase = $script:jsondatabase | Sort-Object {($_.data.Tags -join '
 #---------------------------------------------MANAGEMENT MENU--------------------------------------
 
 function newkey ($basename) {# basename with no extension, e.g. "MyDB"
-$keyfile = Join-Path $script:keydir "$basename.key"; $pwdbfile = Join-Path $script:databasedir "$basename.pwdb"; $script:registryfile = Join-Path $script:privilegedir "$basename.db"
+$keyfile = Join-Path $script:keydir "$basename.key"; $pwdbfile = Join-Path $script:databasedir "$basename.pwdb"; $script:registryfile = Join-Path $script:privilegedir "$basename.users"
 
 if ((Test-Path $keyfile -ea SilentlyContinue) -or (Test-Path $pwdbfile -ea SilentlyContinue) -or (Test-Path $script:registryfile -ea SilentlyContinue)) {$script:warning = "One or more the target files already exists. Choose a different base name."; nomessage; return}
 
@@ -1757,10 +1757,10 @@ $oldKeyName = [System.IO.Path]::GetFileNameWithoutExtension($script:keyfile)
 $newKeyName = [System.IO.Path]::GetFileNameWithoutExtension($newname)
 $oldDbName = Join-Path $script:databasedir "$oldKeyName.pwdb"
 $newDbPath = Join-Path $script:databasedir "$newKeyName.pwdb"
-$oldRegistry = Join-Path $privilegedir "$oldKeyName.db"
-$newRegistry = Join-Path $privilegedir "$newKeyName.db"
-$oldMaster = Join-Path $privilegedir "$oldKeyName.dbkey"
-$newMaster = Join-Path $privilegedir "$newKeyName.dbkey"
+$oldRegistry = Join-Path $privilegedir "$oldKeyName.users"
+$newRegistry = Join-Path $privilegedir "$newKeyName.users"
+$oldMaster = Join-Path $privilegedir "$oldKeyName.pwdb0"
+$newMaster = Join-Path $privilegedir "$newKeyName.pwdb0"
 
 # Prompt to rename, even if file doesn't exist yet.
 Write-Host -f yellow "`n🔄 Rename database from: " -n; Write-Host -f white "$(Split-Path $oldDbName -Leaf)" -n; Write-Host -f yellow " to: " -n; Write-Host -f white "$(Split-Path $newDbPath -Leaf)" -n; Write-Host -f yellow "? (Y/N): " -n; $renameDb = Read-Host
@@ -1783,7 +1783,7 @@ if ($script:warning) {nomessage; return}
 $script:keyfile = $newkeyfile; $script:message += "🧬 Rewrap successful. This database is now using: $newname"; nowarning; return}
 
 function wrapdbkeyformaster ([string]$KeyName = "paschwords") {# Wrap the database key inside the Master key.
-$KeyName = [IO.Path]::GetFileNameWithoutExtension($KeyName); $kpath = Join-Path $script:keydir "$KeyName.key"; $pwrap = Join-Path $privilegedir "$KeyName.dbkey"
+$KeyName = [IO.Path]::GetFileNameWithoutExtension($KeyName); $kpath = Join-Path $script:keydir "$KeyName.key"; $pwrap = Join-Path $privilegedir "$KeyName.pwdb0"
 
 if (-not (Test-Path $kpath)) {$script:warning = "❌ Key file not found: $kpath"; nomessage; return}
 
@@ -1809,11 +1809,11 @@ if (-not (verifymasterpassword $masterSecure)) {$script:failedmaster++; $script:
 resetmasterfailures; $script:rootkey = loadprivilegekey $masterSecure; $real = New-Object byte[] 32; [Array]::Copy($script:rootkey, $script:rootkey.Length - 32, $real, 0, 32); $script:rootkey = $real
 if (-not $script:rootkey) {$script:warning = "❌ Failed to load the Master key."; nomessage; return}
 
-# Wrap and write the new .dbkey.
+# Wrap and write the new .pwdb0.
 try {$wrapped = protectbytesaeshmac $aesKey $script:rootkey; [IO.File]::WriteAllBytes($pwrap, $wrapped); $script:message = "✅ Wrapped key written to: $pwrap"; nowarning; return}
 catch {$script:warning = "❌ Failed to write wrapped key: $_"; nomessage; return}}
 
-function rotatemasterpassword {# Rewrap root.key with a new master password
+function rotatemasterpassword {# Rewrap parent.dat0 with a new master password
 if (masterlockout) {return}
 
 Write-Host -f green "`n`n👑 Enter current master password " -n; $oldPwd = Read-Host -AsSecureString; $rootKey = loadprivilegekey $oldPwd
@@ -1840,7 +1840,7 @@ function switchtomasterkey {# Elevate to master-level access to the current DB
 if (-not $script:database) {$script:warning = "❌ No database is currently loaded."; nomessage; return $false}
 
 Write-Host -f green "`n`n👑 Enter the master password " -n; $securePass = Read-Host -AsSecureString
-$script:switchtomaster = $true; $script:rootkey = loadprivilegekey $securePass; $real = New-Object byte[] 32; [Array]::Copy($script:rootkey, $script:rootkey.Length - 32, $real, 0, 32); $script:rootkey = $real; $basename = [System.IO.Path]::GetFileNameWithoutExtension($script:database); $wrappedPath = Join-Path $privilegedir "$basename.dbkey"
+$script:switchtomaster = $true; $script:rootkey = loadprivilegekey $securePass; $real = New-Object byte[] 32; [Array]::Copy($script:rootkey, $script:rootkey.Length - 32, $real, 0, 32); $script:rootkey = $real; $basename = [System.IO.Path]::GetFileNameWithoutExtension($script:database); $wrappedPath = Join-Path $privilegedir "$basename.pwdb0"
 if (-not (Test-Path $wrappedPath)) {$script:warning = "❌ No wrapped database key found for '$basename'. You may need to wrap the database key inside the Master key first."; nomessage; return $false}
 
 try {$wrapped = [System.IO.File]::ReadAllBytes($wrappedPath); $unwrapped = unprotectbytesaeshmac $wrapped $script:rootkey
@@ -2162,7 +2162,7 @@ startline; Write-Host -f cyan " F. " -n; Write-Host -f white "📂 [F]ull databa
 horizontal
 startline; Write-Host -f cyan " P. " -n; Write-Host -f white "🧬 [P]assword change for database access key.".padright(66) -n; linecap
 startline; Write-Host -f cyan " J. " -n; Write-Host -f white "🔗 [J]oin the database to a Master key: " -n
-$dbkey = Get-ChildItem -Path $privilegedir -Filter '*.dbkey' -File -ea SilentlyContinue
+$dbkey = Get-ChildItem -Path $privilegedir -Filter '*.pwdb0' -File -ea SilentlyContinue
 if (Test-Path $script:rootKeyFile -ea SilentlyContinue) {if ($dbkey.Count -eq 0) {Write-Host -f green "Master key exists.".padright(26) -n}
 elseif ($dbkey.Count -eq 1) {Write-Host -f green "1 child key exists.".padright(26) -n}
 else {Write-Host -f green "$($dbkey.Count) child keys exist.".padright(26) -n}}
@@ -2409,7 +2409,7 @@ if ($sel -match '^\d+$' -and $sel -ge 1 -and $sel -le $script:keyfiles.Count) {$
 if ($script:unlocked) {if ($script:keyfile -match '(?i)((\\[^\\]+){2}\\\w+\.KEY)') {$shortkey = $matches[1]}
 else {$shortkey = $script:keyfile}
 
-$providedkeyname = [IO.Path]::GetFileNameWithoutExtension($script:keyfile); $script:registryfile = Join-Path $privilegedir "$providedkeyname.db"; $script:database = Join-Path $databasedir "$providedkeyname.pwdb"
+$providedkeyname = [IO.Path]::GetFileNameWithoutExtension($script:keyfile); $script:registryfile = Join-Path $privilegedir "$providedkeyname.users"; $script:database = Join-Path $databasedir "$providedkeyname.pwdb"
 if (-not (Test-Path $script:database -ea SilentlyContinue)) {$script:database = $null; $script:registryfile = $null}
 else {loadjson}
 
@@ -2522,7 +2522,7 @@ ValidateURLs.ps1	An external tool, used to test a list of URLs for connectivity.
 Paschwords.psd1		This file contains the configuration details for Paschwords.
 Paschwords.psm1		The main module.
 License.txt		MIT License details.
-validhashes.sha256	Known valid versions of the module, kept in the privilege directory.
+valid.versions	Known valid versions of the module, kept in the privilege directory.
 ## Installation: Module Import & Roll-Back
 On first run, it is recommended to add the line "ipmo paschwords" to your user profile, via the PowerShell command line:
 
@@ -2532,7 +2532,7 @@ Rollback:
 
 You can run Paschwords once without any configuration. Afterwards, it will have created dependencies which will prevent it from running properly if you have not created the necessary accounts and configurations. These include the following directories, which are initially created inside the Paschwords module directory, but you will move these during setup:
 
-.privilege
+.top
 databases
 keys
 logs
@@ -2550,7 +2550,7 @@ Paschwords.ps1
 
 Then run: "EncryptPaschwordsModule.ps1 paschwords.psm1"
 
-This will prompt you for a password to encrypt the module. Do not lose this. It will need to be entered everytime Paschwords is launched, decrypting the module and executing it exclusively in memory. The script will now ask if you want to delete the Paschwords.psm1 file. Agree. This will ensure that the only copy of the Paschwords module that exists, other than your backup, will be the newly created and entirely unique "paschwords.enc" file that will be initiated by the startpaschwords command you created with the profile function above. You now have a fully encrypted, secure, HMAC, RBAC, enterprise grade password manager at your disposal.
+This will prompt you for a password to encrypt the module. Do not lose this. It will need to be entered everytime Paschwords is launched, decrypting the module and executing it exclusively in memory. The script will now ask if you want to delete the Paschwords.psm1 file. Agree. This will ensure that the only copy of the Paschwords module that exists, other than your backup, will be the newly created and entirely unique "paschwords.data" file that will be initiated by the startpaschwords command you created with the profile function above. You now have a fully encrypted, secure, HMAC, RBAC, enterprise grade password manager at your disposal.
 ## Installation: First Launch
 Once running, press M to switch to the Management menu, which is freely accessible only until proper user accounts have been setup.
 
@@ -2592,7 +2592,7 @@ The following lines configure the locations of the password databases, keys, log
 databasedir = 'DefaultPowerShellDirectory\Modules\Paschwords\databases'
 keydir = 'DefaultPowerShellDirectory\Modules\Paschwords\keys'
 logdir = 'DefaultPowerShellDirectory\Modules\Paschwords\logs'
-privilegedir = 'DefaultPowerShellDirectory\Modules\Paschwords\.privilege'
+privilegedir = 'DefaultPowerShellDirectory\Modules\Paschwords\.top'
 ## Paschword Generator: Modes
 When a new entry is added to the database, the user is presented with an option to use the built-in paschword generator, providing users with the ability to create paschwords which still meet all typical security requirements. This option features several intelligent mechanisms to build more useful and memorable paschwords by simply selecting a series of options at the design prompt. In hierarchical order, these option are:
 
