@@ -19,7 +19,7 @@ $aesKey = $Key[0..31]; $hmacKey = $Key[32..63]; $iv = New-Object byte[] 16; [Sec
 
 function encryptmodulefile ([string]$sourcepath, [SecureString]$Password) {# Encrypt file
 # Error-checking.
-Write-Host "Encrypting from $sourcepath"; $sourcepath = Resolve-Path $sourcepath; $script:outputpath = $sourcepath -replace "\.\w+$", ".enc"
+Write-Host "Encrypting from $sourcepath"; $sourcepath = Resolve-Path $sourcepath; $script:outputpath = $sourcepath -replace "\.\w+$", ".data"
 if (-not (Test-Path $sourcepath)) {Write-Host -ForegroundColor Red "Source file not found!"; return}
 
 # Generate salt and key.
@@ -31,7 +31,7 @@ $content = [System.IO.File]::ReadAllText($sourcepath); [byte[]]$raw = [System.Te
 # Add HMAC.
 $protected = protectbytesaeshmac -Data $compressed -Key $Key
 
-try {[IO.File]::WriteAllBytes($script:outputpath, $Salt + $protected); Write-Host -ForegroundColor Green "Write operation succeeded"; $powershell = Split-Path $profile; Add-Content -Path "$powershell\Modules\Paschwords\.privilege\validhashes.sha256" -Value "# Paschwords.enc ($(Get-Date))`n$((Get-FileHash -Algorithm SHA256 $powershell\Modules\Paschwords\Paschwords.enc).Hash)"}
+try {[IO.File]::WriteAllBytes($script:outputpath, $Salt + $protected); Write-Host -ForegroundColor Green "Write operation succeeded"; $powershell = Split-Path $profile; Add-Content -Path "$powershell\Modules\Paschwords\.privilege\valid.versions" -Value "# Paschwords.data ($(Get-Date))`n$((Get-FileHash -Algorithm SHA256 $powershell\Modules\Paschwords\Paschwords.data).Hash)"}
 catch {Write-Host -ForegroundColor Red "Write operation failed: $_"}}
 
 # User interaction.
@@ -39,5 +39,5 @@ if (-not $sourcefile) {Write-Host -f cyan "`nUsage: encryptpasswordsmodule sourc
 Write-Host -f green "`nEnter password used to encrypt the module " -n; $password = Read-Host -AsSecureString
 encryptmodulefile $sourcefile $password
 Write-Host -f green "🔐 Module encrypted successfully: " -n; Write-Host -f white "$script:outputpath`n"; $password = $null
-#Write-Host -f white "Do you now want to delete the unencrypted version of the module? " -n; $confirmdelete = Read-Host
+Write-Host -f white "Do you now want to delete the unencrypted version of the module? " -n; $confirmdelete = Read-Host
 if ($confirmdelete -match "^[Yy]") {Remove-Item $sourcefile -Force}
