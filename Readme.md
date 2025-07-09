@@ -53,9 +53,8 @@ A setup wizard and full help text is provided inline.
 </table>
 
     # Core module details
-    @{
-    RootModule = 'Paschwords.psm1'
-    ModuleVersion = '4.61'
+    @{RootModule = 'Paschwords.psm1'
+    ModuleVersion = '4.63'
     GUID = 'd4f71764-0e43-4632-8b35-0f0a79b36f62'
     Author = 'Schvenn'
     CompanyName = 'Plath Consulting Incorporated'
@@ -63,12 +62,18 @@ A setup wizard and full help text is provided inline.
     Description = 'Secure password manager using AES encryption and key-based protection.'
     PowerShellVersion = '5.1'
     FunctionsToExport = @('paschwords')
-    CompatiblePSEditions = @('Desktop')
+    CmdletsToExport = @()
+    VariablesToExport = @()
+    AliasesToExport = @()
+    FileList = @('Paschwords.psm1', 'license.txt')
     
-    # Configuration data
-    PrivateData = @{
+    PrivateData = @{PSData = @{Tags = @('aes','clipboard','cybersecurity','encryption','hmac','manager','password','rbac','security')
+    LicenseUri = 'https://github.com/Schvenn/Paschwords/blob/main/license.txt'
+    ProjectUri = 'https://github.com/Schvenn/Paschwords'
+    ReleaseNotes = 'Full AES password management system with secure storage, clipboard integration, HMAC validation, RBAC mechanisms, brute force protection and full event and authentication logging.'}
+    
     delayseconds = '30'
-    privilegedir = 'DefaultPowerShellDirectory\Modules\Paschwords\.privilege'
+    privilegedir = 'DefaultPowerShellDirectory\Modules\Paschwords\.top'
     archiveslimit = '5'
     databasedir = 'DefaultPowerShellDirectory\Modules\Paschwords\databases'
     keydir = 'DefaultPowerShellDirectory\Modules\Paschwords\keys'
@@ -81,8 +86,7 @@ A setup wizard and full help text is provided inline.
     dictionaryfile = 'common.dictionary.gz'
     logdir = 'DefaultPowerShellDirectory\Modules\Paschwords\logs'
     timetobootlimit = '60'
-    defaultdatabase = 'paschwords.pwdb'
-    }}
+    defaultdatabase = 'paschwords.pwdb'}}
 
 The script checks itself against a set of valid SHA256 hashes to ensure the file has not been modified.
 A script "CheckNTPTime.ps1", ensures the system time hasn't been tampered with, in order to avoid user account expirations.
