@@ -229,21 +229,34 @@ $result = $plainA -eq $plainB
 [Runtime.InteropServices.Marshal]::ZeroFreeBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($b))
 return $result}
 
-function wordwrap ($field, [int]$maximumlinelength = 66) {# Modify fields sent to it with proper word wrapping.
-if ($null -eq $field -or $field.Length -eq 0) {return $null}
+function wordwrap ($field, $maximumlinelength) {# Modify fields sent to it with proper word wrapping.
+if ($null -eq $field) {return $null}
 $breakchars = ',.;?!\/ '; $wrapped = @()
 
-foreach ($line in $field -split "`n") {if ($line.Trim().Length -eq 0) {$wrapped += ''; continue}
-$remaining = $line.Trim()
+if (-not $maximumlinelength) {[int]$maximumlinelength = (100, $Host.UI.RawUI.WindowSize.Width | Measure-Object -Maximum).Maximum}
+if ($maximumlinelength -lt 60) {[int]$maximumlinelength = 60}
+if ($maximumlinelength -gt $Host.UI.RawUI.BufferSize.Width) {[int]$maximumlinelength = $Host.UI.RawUI.BufferSize.Width}
+
+foreach ($line in $field -split "`n", [System.StringSplitOptions]::None) {if ($line -eq "") {$wrapped += ""; continue}
+$remaining = $line
 while ($remaining.Length -gt $maximumlinelength) {$segment = $remaining.Substring(0, $maximumlinelength); $breakIndex = -1
 
 foreach ($char in $breakchars.ToCharArray()) {$index = $segment.LastIndexOf($char)
-if ($index -gt $breakIndex) {$breakChar = $char; $breakIndex = $index}}
-if ($breakIndex -lt 0) {$breakIndex = $maximumlinelength - 1; $breakChar = ''}
-$chunk = $segment.Substring(0, $breakIndex + 1).TrimEnd(); $wrapped += $chunk; $remaining = $remaining.Substring($breakIndex + 1).TrimStart()}
+if ($index -gt $breakIndex) {$breakIndex = $index}}
+if ($breakIndex -lt 0) {$breakIndex = $maximumlinelength - 1}
+$chunk = $segment.Substring(0, $breakIndex + 1); $wrapped += $chunk; $remaining = $remaining.Substring($breakIndex + 1)}
 
-if ($remaining.Length -gt 0) {$wrapped += $remaining}}
+if ($remaining.Length -gt 0 -or $line -eq "") {$wrapped += $remaining}}
 return ($wrapped -join "`n")}
+
+function line ($colour, $length, [switch]$pre, [switch]$post, [switch]$double) {if (-not $length) {# Display a horizontal line.
+[int]$length = (100, $Host.UI.RawUI.WindowSize.Width | Measure-Object -Maximum).Maximum}
+if ($length) {if ($length -lt 60) {[int]$length = 60}
+if ($length -gt $Host.UI.RawUI.BufferSize.Width) {[int]$length = $Host.UI.RawUI.BufferSize.Width}}
+if ($pre) {Write-Host ""}
+$character = if ($double) {"="} else {"-"}
+Write-Host -f $colour ($character * $length)
+if ($post) {Write-Host ""}}
 
 function indent ($field, $colour = 'white', [int]$indent = 2) {# Set a default indent for a field.
 if ($field.length -eq 0) {return}
@@ -251,21 +264,61 @@ $prefix = (' ' * $indent)
 foreach ($line in $field -split "`n") {Write-Host -f $colour "$prefix$line"}}
 
 function helptext {# Detailed help.
+# Select content.
+$scripthelp = (Get-Command paschwordshelpdialogue).ScriptBlock.ToString(); $sections = [regex]::Matches($scripthelp, "(?im)^## (.+?)(?=\r?\n)"); $selection = $null; $lines = @(); $wrappedLines = @(); $position = 0; $pageSize = 30; $inputBuffer = ""
 
-function scripthelp ($section) {# (Internal) Generate the help sections from the comments section of the script.
-Write-Host -f yellow ("-" * 100); $pattern = "(?ims)^## ($section.*?)(##|\z)"; $match = [regex]::Match($scripthelp, $pattern); $lines = $match.Groups[1].Value.TrimEnd() -split "`r?`n", 2; Write-Host $lines[0] -f yellow; Write-Host -f yellow ("-" * 100)
+function scripthelp ($section) {$pattern = "(?ims)^## ($([regex]::Escape($section)).*?)(?=^##|\z)"; $match = [regex]::Match($scripthelp, $pattern); $lines = $match.Groups[1].Value.TrimEnd() -split "`r?`n", 2; if ($lines.Count -gt 1) {$wrappedLines = (wordwrap $lines[1] 100) -split "`n", [System.StringSplitOptions]::None}
+else {$wrappedLines = @()}
+$position = 0}
 
-if ($lines.Count -gt 1) {$text = wordwrap $lines[1] 100 | Out-String; $text = $text.TrimEnd("`r", "`n"); Write-Host $text}; Write-Host -f yellow ("-" * 100)}
+# Display Table of Contents.
+while ($true) {cls; Write-Host -f cyan "Paschwords Help Sections:`n"
 
-$scripthelp = (Get-Command paschwordshelpdialogue).ScriptBlock.ToString(); $sections = [regex]::Matches($scripthelp, "(?im)^## (.+?)(?=\r?\n)"); $selection = $null
-do {cls; Write-Host "Paschwords Help Sections:`n" -f cyan; for ($i = 0; $i -lt $sections.Count; $i++) {"{0}: {1}" -f ($i + 1), $sections[$i].Groups[1].Value}
-if ($selection) {scripthelp $sections[$selection - 1].Groups[1].Value}
-Write-Host -f white "`nEnter a section number to view " -n; $input = Read-Host
-if ($input -match '^\d+$') {$index = [int]$input
-if ($index -ge 1 -and $index -le $sections.Count) {$selection = $index}
-else {$selection = $null}} else {return}}
-while ($true); return}
+if ($sections.Count -gt 7) {$half = [Math]::Ceiling($sections.Count / 2)
+for ($i = 0; $i -lt $half; $i++) {$leftIndex = $i; $rightIndex = $i + $half; $leftNumber  = "{0,2}." -f ($leftIndex + 1); $leftLabel   = " $($sections[$leftIndex].Groups[1].Value)"; $leftOutput  = [string]::Empty
 
+if ($rightIndex -lt $sections.Count) {$rightNumber = "{0,2}." -f ($rightIndex + 1); $rightLabel  = " $($sections[$rightIndex].Groups[1].Value)"; Write-Host -f cyan $leftNumber -n; Write-Host -f white $leftLabel -n; $pad = 42 - ($leftNumber.Length + $leftLabel.Length)
+if ($pad -gt 0) {Write-Host (" " * $pad) -n}; Write-Host -f cyan $rightNumber -n; Write-Host -f white $rightLabel}
+else {Write-Host -f cyan $leftNumber -n; Write-Host -f white $leftLabel}}}
+
+else {for ($i = 0; $i -lt $sections.Count; $i++) {Write-Host -f cyan ("{0,2}. " -f ($i + 1)) -n; Write-Host -f white "$($sections[$i].Groups[1].Value)"}}
+
+# Display Header.
+line yellow 100
+if ($lines.Count -gt 0) {Write-Host  -f yellow $lines[0]}
+else {Write-Host "Choose a section to view." -f darkgray}
+line yellow 100
+
+# Display content.
+$end = [Math]::Min($position + $pageSize, $wrappedLines.Count)
+for ($i = $position; $i -lt $end; $i++) {Write-Host -f white $wrappedLines[$i]}
+
+# Pad display section with blank lines.
+for ($j = 0; $j -lt ($pageSize - ($end - $position)); $j++) {Write-Host ""}
+
+# Display menu options.
+line yellow 100; Write-Host -f white "[↑/↓]  [PgUp/PgDn]  [Home/End]  |  [#] Select section  |  [Q] Quit  " -n; if ($inputBuffer.length -gt 0) {Write-Host -f cyan "section: $inputBuffer" -n}; $key = [System.Console]::ReadKey($true)
+
+# Define interaction.
+switch ($key.Key) {'UpArrow' {if ($position -gt 0) { $position-- }; $inputBuffer = ""}
+'DownArrow' {if ($position -lt ($wrappedLines.Count - $pageSize)) { $position++ }; $inputBuffer = ""}
+'PageUp' {$position -= 30; if ($position -lt 0) {$position = 0}; $inputBuffer = ""}
+'PageDown' {$position += 30; $maxStart = [Math]::Max(0, $wrappedLines.Count - $pageSize); if ($position -gt $maxStart) {$position = $maxStart}; $inputBuffer = ""}
+'Home' {$position = 0; $inputBuffer = ""}
+'End' {$maxStart = [Math]::Max(0, $wrappedLines.Count - $pageSize); $position = $maxStart; $inputBuffer = ""}
+
+'Enter' {if ($inputBuffer -eq "") {"`n"; return}
+elseif ($inputBuffer -match '^\d+$') {$index = [int]$inputBuffer
+if ($index -ge 1 -and $index -le $sections.Count) {$selection = $index; $pattern = "(?ims)^## ($([regex]::Escape($sections[$selection-1].Groups[1].Value)).*?)(?=^##|\z)"; $match = [regex]::Match($scripthelp, $pattern); $block = $match.Groups[1].Value.TrimEnd(); $lines = $block -split "`r?`n", 2
+if ($lines.Count -gt 1) {$wrappedLines = (wordwrap $lines[1] 100) -split "`n", [System.StringSplitOptions]::None}
+else {$wrappedLines = @()}
+$position = 0}}
+$inputBuffer = ""}
+
+default {$char = $key.KeyChar
+if ($char -match '^[Qq]$') {"`n"; return}
+elseif ($char -match '^\d$') {$inputBuffer += $char}
+else {$inputBuffer = ""}}}}}
 
 #---------------------------------------------HOUSE CLEANING---------------------------------------
 
@@ -2523,7 +2576,7 @@ Paschwords.psd1		This file contains the configuration details for Paschwords.
 Paschwords.psm1		The main module.
 License.txt		MIT License details.
 valid.versions	Known valid versions of the module, kept in the privilege directory.
-## Installation: Module Import & Roll-Back
+## Installation: Import & Roll-Back
 On first run, it is recommended to add the line "ipmo paschwords" to your user profile, via the PowerShell command line:
 
 		'`nipmo paschwords' | Add-Content -Path $PROFILE
@@ -2578,10 +2631,10 @@ The following two lines set the name of the default password (PWDB) and key file
 
 defaultdatabase = 'paschwords.pwdb'
 defaultkey = 'paschwords.key'
-## Installation: PSD1 Configuration Continued...
+
 This line sets the name of the default dictionary to be used within the embedded Paschwords password generator:
 
-dictionaryfile = 'common.dictionary'
+dictionaryfile = 'common.dictionary.gz'
 
 This line sets the User-Agent to be used for the ValidURLs support script:
 
@@ -2662,6 +2715,17 @@ Now, you have the tool at your disposal, you can use it to mix and match as you 
 • 🪪 User logged in, both entries on this line will display in red if Master privileges are active.
 
 • 🗨️ Message and ⚠  Warning centers regarding the status of the last executed commands.
+
+Function Keys:
+
+• [F9] View current configuration settings.
+
+Privileged Users:
+
+• [F4] Disable logging. Logging will be reenabled when any key is reloaded/unlocked.
+• [F5] Verify logs. Browse logs for HMAC valdiation in order to find tampering.
+• [F10] Modify PSD1 configuration file.
+• [F12] Sort by Name and then Tag and resave the database.
 ## Menu Options: Main Menu
 • 🔓 [R]etrieve an entry from the currently loaded database.
 • 📋 [Z] Toggle clipboard status for automatically copying retrieved passwords.
@@ -2695,23 +2759,12 @@ Available only to privileged users:
 • [X]port the current search criteria to a "searchresults.csv" file in the database directory. The Valid URLs search however, will export to a "validurls.txt" file in the database directory, at which point the user has an option to run the supplementary "ValidateURLs" script.
 
 • [ESC] or [Q]uit will return to the main menu.
-## Menu Options: ValidateURLs.ps1 Supplementary Script
+## Menu Options: ValidateURLs.ps1 Script
 The ValidateURLs.ps1 script uses various methods to attempt connection to each URL listed in the file passed to it. It then generates two files based on the results, "validatedurls.txt" and "expiredurls.txt". 
 
 While this script was designed specifically for use with Paschwords, it is independant, in order to maintain the offline security of the database manager. As such, it can also be used entirely separate from this module, as well.
 
 It accepts 3 arguments; the input filename, a "-safe" switch to slow processing down, in order to prevent the current system from getting blocked for suspcious activity, due to the speed of processing, and a "user-agent" for the same purpose. A user-agent should always be used, rather than the standard PowerShell user-agent, lest the current computer get blocked for rapid fire URL testing. This is the reason the PSD1 file for Paschwords has a user-agent pre-configured.
-## Menu Options: Function Keys
-Standard Users:
-
-• [F9] View current configuration settings.
-
-Privileged Users:
-
-• [F4] Disable logging. Logging will be reenabled when any key is reloaded/unlocked.
-• [F5] Verify logs. Browse logs for HMAC valdiation in order to find tampering.
-• [F10] Modify PSD1 configuration file.
-• [F12] Sort by Name and then Tag and resave the database.
 ## Menu Options: Management Menu
 • 📄 Create a [N]ew password database. One key or Master key can unlock one or multiple databases.
 • ✅ [S]anitize a PWDB file, correcting IV collisions ensures database security and file health.
@@ -2734,7 +2787,7 @@ Privileged Users:
 • ❌ [X]Remove a user.
 
 • Z. 🧙‍♂️ New workspace setup Wi[Z]ard, to create a new key, database & user registry combination.
-## Technical Details: Password handling
+## Technical Details
 • Database passwords are secured via PBKDF2-based key derivation, salted and hashed with SHA-256, but are never stored.
 
 • Master passwords are secured similarly using PBKDF2 with salt and SHA-256 hashing, and validated via a separate authentication mechanism.
@@ -2744,7 +2797,7 @@ Privileged Users:
 • Each password entry within a database, each password database at the file level, and the user registry at the file level are all encrypted with AES-256-CBC using unique, random IVs after which, HMAC validation is appended in order to ensure integrity and detect tampering.
 
 • After database passwords are individually AES-encrypted, they are then Base64-encoded, before per-entry HMAC is appended.
-## Technical Details: File handling
+
 • The database is serialized to JSON, compressed with GZIP, then encrypted at rest, at which point the file-level HMAC is appended.
 
 • The user registry is serialized to JSON, then encrypted at rest and features file-level HMAC.
@@ -2752,12 +2805,12 @@ Privileged Users:
 • Since the user registry always remains small, per entry HMAC and file level GZip compression would provide no appreciable security or size benefits, which is why it differs in implementation from the database and entries stored therein.
 
 • This layered approach ensures robust security through strong KDFs, encryption, integrity verification, compression, and encoding.
-## Technical Details: Additional Security Features
+
 • Designed with zero-trust principles; keys, secrets, and databases are securely wiped multiple times using diverse methods after critical operations.
 
 • Role-Based Access Control (RBAC) enforces two-factor authentication and three privilege levels.
 
-• Brute-force protection mechanisms safeguard both the master password and individual user accounts.
+• Brute-force protection mechanisms safeguard both master password and individual user accounts.
 
 • External NTP time synchronization and hash verification enable trusted source execution.
 
